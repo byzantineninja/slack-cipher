@@ -6,7 +6,7 @@
   const SEND = '[data-qa="texty_send_button"]';
   const composers = new Map();
   const rendered = new Map();
-  let route = '', scheduled = false, encryptionEnabled = true, stopped = false;
+  let route = '', scheduled = false, overlayVisible = true, stopped = false;
   let extensionId, composerUrl, scanTimer, pollTimer, observer;
   const reloadMessage = 'Slack Cipher 已更新或停用，請先複製未送出草稿，再重新整理 Slack。';
   function invalidate() {
@@ -105,7 +105,7 @@
     for (const [id,item] of composers) {
       if (!item.root.isConnected || !item.editor.isConnected || !sameContext(item)) { item.root.classList.remove('slackenc-hidden'); item.frame.remove(); composers.delete(id); }
     }
-    if (!workspace() || !encryptionEnabled) { restoreComposers(); return; }
+    if (!workspace() || !overlayVisible) { restoreComposers(); return; }
     document.querySelectorAll(EDITOR).forEach(editor => {
       const root = composerRoot(editor);
       if (!root || [...composers.values()].some(item => item.root === root)) return;
@@ -161,7 +161,7 @@
   // Guard hidden native composers against accidental plaintext input or submission.
   for (const type of ['keydown','beforeinput','paste','drop','click','submit']) {
     document.addEventListener(type, event => {
-      if (!event.isTrusted || !encryptionEnabled || !workspace()) return;
+      if (!event.isTrusted || !overlayVisible || !workspace()) return;
       const editor = event.target instanceof Element && event.target.closest(EDITOR);
       const root = editor ? composerRoot(editor) : [...composers.values()].find(item => item.root.contains(event.target))?.root;
       if (root) { event.preventDefault(); event.stopImmediatePropagation(); }
@@ -172,16 +172,17 @@
     const reply = result => { try { respond(result); } catch { invalidate(); } };
     if (!runtimeAvailable()) { reply({ok:false,error:reloadMessage}); return; }
     if (message.type === 'settings-changed') {
-      encryptionEnabled = message.encryptionEnabled !== false;
-      if (!encryptionEnabled) restoreComposers();
+      overlayVisible = message.overlayVisible !== false;
+      if (!overlayVisible) restoreComposers();
       restoreMessages(); schedule(); reply({ok:true}); return;
     }
     if (message.type !== 'deliver') return;
     const item = composers.get(message.composer);
     async function deliver() {
       if (!runtimeAvailable()) throw new Error(reloadMessage);
-      if (!encryptionEnabled || !item || item.busy || item.scope !== message.scope || !sameContext(item) || !item.editor.isConnected) throw new Error('頻道或輸入框已變更，草稿已保留');
-      if (!/^⚿:[A-Za-z0-9]{12}:~[\u4e00-\u8dff]+[0-9a-d]$/.test(message.text)) throw new Error('拒絕傳送非密文');
+      if (!overlayVisible || !item || item.busy || item.scope !== message.scope || !sameContext(item) || !item.editor.isConnected) throw new Error('頻道或輸入框已變更，草稿已保留');
+      if (typeof message.encrypted !== 'boolean' || typeof message.text !== 'string' || !message.text.trim()) throw new Error('無效的訊息送出模式');
+      if (message.encrypted && !/^⚿:[A-Za-z0-9]{12}:~[\u4e00-\u8dff]+[0-9a-d]$/.test(message.text)) throw new Error('拒絕傳送非密文');
       if (item.editor.textContent.trim()) throw new Error('Slack 原生輸入框有草稿或待確認密文。請暫時停用擴充套件並處理草稿後重試');
       item.busy = true;
       try {
@@ -193,7 +194,7 @@
         if (!document.execCommand('insertText', false, message.text)) throw new Error('無法填入 Slack 輸入框');
         await new Promise(resolve => setTimeout(resolve, 100));
         if (!runtimeAvailable()) throw new Error(reloadMessage);
-        if (!encryptionEnabled || !sameContext(item) || !item.editor.isConnected || item.editor.textContent.trim() !== message.text) throw new Error('Slack 輸入內容不符，已停止送出');
+        if (!overlayVisible || !sameContext(item) || !item.editor.isConnected || (item.editor.innerText ?? item.editor.textContent).trim() !== message.text.trim()) throw new Error('Slack 輸入內容不符，已停止送出');
         const button = item.root.querySelector(SEND);
         if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') throw new Error('找不到可用的 Slack 送出按鈕');
         button.click();
@@ -211,7 +212,7 @@
     return true;
   };
   async function refresh() {
-    try { const state = await request({type:'state'}); encryptionEnabled = state.encryptionEnabled !== false; restoreMessages(); schedule(); }
+    try { const state = await request({type:'state'}); overlayVisible = state.overlayVisible !== false; restoreMessages(); schedule(); }
     catch { /* Existing protected composers stay blocked if the worker is unavailable. */ }
   }
   try {

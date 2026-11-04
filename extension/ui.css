@@ -11,3 +11,5 @@ button:disabled { opacity: .5; cursor: default; } .secondary { background: #666;
 #key, #status, .note { font-size: 12px; } #status { overflow-wrap: anywhere; } pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .danger { background: #a12b35; } .toggle { display: flex; align-items: center; gap: 8px; } .toggle input { width: auto; margin: 0; } dialog { max-width: 320px; border: 1px solid #888; border-radius: 8px; } dialog::backdrop { background: #0007; }
+
+.composer .toggle { margin: 0; } .composer #key { margin-top: 4px; }

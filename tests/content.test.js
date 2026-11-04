@@ -18,7 +18,7 @@ function fixture({draft = '', decryptError = false, noKey = false, workerDown = 
       if (rejectNext) { rejectNext = false; throw new Error('Extension context invalidated.'); }
       if (message.type === 'state') {
         if (workerDown) throw new Error('worker unavailable');
-        return {ok:true,defaultKeyId:noKey ? '' : 'abcdefghijkl',encryptionEnabled:enabled};
+        return {ok:true,defaultKeyId:noKey ? '' : 'abcdefghijkl',overlayVisible:enabled};
       }
       if (message.type === 'decrypt') { decryptRequests.push(message); return decryptError || message.scope !== scope ? {ok:false,error:'尚未設定金鑰或頻道不符'} : {ok:true,text:'<img src=x onerror=alert(1)>秘密'}; }
     }}
@@ -32,7 +32,7 @@ function fixture({draft = '', decryptError = false, noKey = false, workerDown = 
     sent.push(target.textContent); sentTargets.push(target); target.textContent = '';
   });
   w.eval(script);
-  return {dom,w,editor,sent,sentTargets,decryptRequests,get runtimeCalls() { return runtimeCalls; },rejectNextRequest:() => { rejectNext = true; },setEnabled:async value => { enabled = value; listener({type:'settings-changed',encryptionEnabled:value},{id:'test'},() => {}); },deliver:message => new Promise(resolve => listener({type:'deliver',text:cipher,scope,...message},{id:'test'},resolve))};
+  return {dom,w,editor,sent,sentTargets,decryptRequests,get runtimeCalls() { return runtimeCalls; },rejectNextRequest:() => { rejectNext = true; },setOverlay:async value => { enabled = value; listener({type:'settings-changed',overlayVisible:value},{id:'test'},() => {}); },deliver:message => new Promise(resolve => listener({type:'deliver',encrypted:true,text:cipher,scope,...message},{id:'test'},resolve))};
 }
 test('replace native composer, safely render plaintext, deliver ciphertext and restore on navigation', async t => {
   const f = fixture(); t.after(() => f.dom.window.close()); await wait(250);
@@ -78,15 +78,15 @@ test('every DM, group DM and channel stays protected even with no key or worker'
   }
 });
 
-test('global switch restores native input, keeps decryption, and rejects stale deliveries', async t => {
+test('overlay visibility restores native input, keeps decryption, and rejects stale deliveries', async t => {
   const f = fixture(); t.after(() => f.dom.window.close()); await wait(200);
   const old = new URLSearchParams(new URL(f.w.document.querySelector('iframe').src).hash.slice(1)).get('composer');
-  await f.setEnabled(false); await wait(200);
+  await f.setOverlay(false); await wait(200);
   assert.equal(f.w.document.querySelector('iframe'),null);
   assert.equal(f.editor.closest('.p-message_input').classList.contains('slackenc-hidden'),false);
   assert.ok(f.w.document.querySelector('.slackenc-plaintext'));
   assert.equal((await f.deliver({composer:old})).ok,false);
-  await f.setEnabled(true); await wait(200);
+  await f.setOverlay(true); await wait(200);
   assert.ok(f.w.document.querySelector('iframe'));
   assert.ok(f.editor.closest('.p-message_input').classList.contains('slackenc-hidden'));
 });
@@ -114,7 +114,7 @@ test('thread pane has its own composer and uses its channel rather than the main
   const result = await f.deliver({composer:params.get('composer'),scope:'T123/C789'});
   assert.equal(result.ok,true); assert.equal(f.sentTargets[0],thread.editor);
   assert.equal(f.editor.textContent,'');
-  await f.setEnabled(false);
+  await f.setOverlay(false);
   assert.equal(f.w.document.querySelector('iframe'),null);
   assert.equal(thread.root.classList.contains('slackenc-hidden'),false);
   assert.equal(f.editor.closest('.p-message_input').classList.contains('slackenc-hidden'),false);
@@ -208,4 +208,17 @@ test('invalidation during insertion stops delivery before clicking send', async 
   assert.equal(f.editor.textContent,cipher);
   assert.ok(f.editor.closest('.p-message_input').classList.contains('slackenc-hidden'));
   assert.equal(f.editor.closest('.p-message_input').classList.contains('slackenc-sending'),false);
+});
+
+test('explicit plaintext delivery keeps the overlay visible and requires a valid mode', async t => {
+  const f = fixture(); t.after(() => f.dom.window.close()); await wait(200);
+  const composer = frameParams(f.w.document.querySelector('iframe')).get('composer');
+  const plain = '明文訊息\n第二行';
+  assert.equal((await f.deliver({composer,encrypted:false,text:plain})).ok,true);
+  assert.deepEqual(f.sent,[plain]);
+  assert.ok(f.w.document.querySelector('iframe'));
+  assert.ok(f.editor.closest('.p-message_input').classList.contains('slackenc-hidden'));
+  assert.equal((await f.deliver({composer,encrypted:true,text:plain})).ok,false);
+  assert.equal((await f.deliver({composer,encrypted:undefined,text:plain})).ok,false);
+  assert.equal(f.sent.length,1);
 });

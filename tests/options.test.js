@@ -9,12 +9,12 @@ test('settings requires key removal confirmation and exposes a working global sw
   const dom = new JSDOM(html,{url:'https://extension.test/options.html',runScripts:'outside-only'});
   t.after(() => dom.window.close());
   const {window:w} = dom, messages = [];
-  let ids = ['abcdefghijkl'], defaultKeyId = ids[0], encryptionEnabled = true;
+  let ids = ['abcdefghijkl'], defaultKeyId = ids[0], overlayVisible = true;
   w.chrome = {runtime:{async sendMessage(message) {
     messages.push(message);
-    if (message.type === 'state') return {ok:true,ids,defaultKeyId,encryptionEnabled};
+    if (message.type === 'state') return {ok:true,ids,defaultKeyId,overlayVisible};
     if (message.type === 'delete-key') { ids = []; defaultKeyId = ''; }
-    if (message.type === 'set-enabled') encryptionEnabled = message.enabled;
+    if (message.type === 'set-overlay') overlayVisible = message.visible;
     return {ok:true};
   }},storage:{session:{async get() { return {}; }},onChanged:{addListener() {}}}};
   const dialog = w.document.querySelector('dialog');
@@ -31,8 +31,8 @@ test('settings requires key removal confirmation and exposes a working global sw
   assert.equal(messages.filter(m => m.type === 'delete-key').length,1);
   assert.ok(w.document.querySelector('#delete').disabled);
   assert.match(w.document.querySelector('#default-key').textContent,/尚未設定/);
-  const toggle = w.document.querySelector('#enabled');
+  const toggle = w.document.querySelector('#show-overlay');
   toggle.checked = false; toggle.dispatchEvent(new w.Event('change')); await settle();
-  assert.equal(encryptionEnabled,false);
-  assert.match(w.document.querySelector('#encryption-state').textContent,/送出明文/);
+  assert.equal(overlayVisible,false);
+  assert.match(w.document.querySelector('#overlay-state').textContent,/已隱藏覆蓋輸入框/);
 });

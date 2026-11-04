@@ -5,7 +5,7 @@
 <div class="bar"><button id="export">下載選定金鑰</button><button id="delete" class="danger">移除選定金鑰</button></div>
 <dialog id="delete-dialog"><p id="delete-warning"></p><p>移除後，未備份的金鑰無法復原，其歷史訊息也無法解密。建議先下載金鑰備份。</p><div class="bar"><button id="cancel-delete" class="secondary">取消</button><button id="confirm-delete" class="danger">確認移除</button></div></dialog>
 <label>匯入金鑰檔<input id="import" type="file" accept="application/json,.json"></label>
-<hr><h2>訊息加密</h2><label class="toggle"><input id="enabled" type="checkbox">所有對話啟用加密</label><p id="encryption-state"></p><p>啟用時，頻道、私訊與群組私訊使用預設金鑰送出；未設定金鑰時將阻止送出。關閉後恢復 Slack 原生輸入框，訊息將以明文送出；已有密文仍會自動解密。</p>
+<hr><h2>輸入框顯示</h2><label class="toggle"><input id="show-overlay" type="checkbox">顯示覆蓋輸入框</label><p id="overlay-state"></p><p>顯示時，可在每個輸入框內切換加密或明文送出。隱藏時恢復 Slack 原生輸入框；已有密文仍會自動解密。</p>
 <button id="set-default">將選定金鑰設為預設</button><p id="default-key"></p><p id="status" role="status"></p>
 <hr><h2>本次瀏覽階段的未送出草稿</h2><p>切換頻道或重新整理後，可從這裡複製回安全輸入框。關閉瀏覽器後清除。</p><div id="drafts"></div>
 <p class="note">解密文字會放回 Slack 頁面，頁面程式可能讀取。第一版僅支援文字；附件與編輯訊息不受支援。金鑰匯出檔含秘密，請妥善保存。</p>

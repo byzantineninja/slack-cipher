@@ -25,8 +25,8 @@ test('key lifecycle, protected storage, global default key and encrypted send', 
   assert.equal(state.defaultKeyId,id);
   assert.equal((await call({type:'set-default',id},page)).ok,false);
   assert.equal((await call({type:'set-default',id})).ok,true);
-  assert.equal((await call({type:'send',scope:'T123/C456',composer:'abc',text:'秘密'},page)).ok,false);
-  assert.equal((await call({type:'send',scope:'T123/C456',composer:'abc',text:'秘密'},composer)).ok,true);
+  assert.equal((await call({type:'send',encrypt:true,scope:'T123/C456',composer:'abc',text:'秘密'},page)).ok,false);
+  assert.equal((await call({type:'send',encrypt:true,scope:'T123/C456',composer:'abc',text:'秘密'},composer)).ok,true);
   assert.equal(delivered.tab,7); assert.deepEqual(delivered.options,{frameId:0});
   assert.ok(!delivered.message.text.includes('秘密'));
   const plain = await call({type:'decrypt',scope:'T123/C456',text:delivered.message.text},page);
@@ -39,10 +39,10 @@ test('key lifecycle, protected storage, global default key and encrypted send', 
   const altered = JSON.parse(exported.value); altered.key = toHex(crypto.getRandomValues(new Uint8Array(32)));
   assert.equal((await call({type:'import',value:JSON.stringify(altered)})).ok,false);
   for (const scope of ['T123/C999','T123/D999','T999/G999']) {
-    assert.equal((await call({type:'send',scope,text:'secret'},composer)).ok,true);
+    assert.equal((await call({type:'send',encrypt:true,scope,text:'secret'},composer)).ok,true);
     assert.equal((await call({type:'decrypt',scope,text:delivered.message.text},page)).text,'secret');
   }
-  assert.equal((await call({type:'send',scope:'invalid',text:'secret'},composer)).ok,false);
+  assert.equal((await call({type:'send',encrypt:true,scope:'invalid',text:'secret'},composer)).ok,false);
 });
 test('simultaneous creates preserve keys and the existing global default', async () => {
   const created = await Promise.all(Array.from({length:10},() => call({type:'create'})));
@@ -57,22 +57,22 @@ test('simultaneous creates preserve keys and the existing global default', async
 test('no default key blocks sending even when another key exists', async () => {
   const previous = data.defaultKeyId;
   data.defaultKeyId = '';
-  assert.equal((await call({type:'send',scope:'T123/D999',text:'secret'},composer)).ok,false);
+  assert.equal((await call({type:'send',encrypt:true,scope:'T123/D999',text:'secret'},composer)).ok,false);
   data.defaultKeyId = previous;
 });
 
-test('encryption switch is persistent, authorized, and does not disable reading', async () => {
+test('overlay visibility is persistent, authorized, and does not disable reading', async () => {
   const id = (await call({type:'state'})).defaultKeyId;
-  await call({type:'send',scope:'T123/C456',text:'secret'},composer);
+  await call({type:'send',encrypt:true,scope:'T123/C456',text:'secret'},composer);
   const ciphertext = delivered.message.text;
-  assert.equal((await call({type:'set-enabled',enabled:false},page)).ok,false);
-  assert.equal((await call({type:'set-enabled',enabled:'false'})).ok,false);
-  assert.equal((await call({type:'set-enabled',enabled:false})).ok,true);
-  assert.equal((await call({type:'state'})).encryptionEnabled,false);
-  assert.equal((await call({type:'send',scope:'T123/C456',text:'secret'},composer)).ok,false);
+  assert.equal((await call({type:'set-overlay',visible:false},page)).ok,false);
+  assert.equal((await call({type:'set-overlay',visible:'false'})).ok,false);
+  assert.equal((await call({type:'set-overlay',visible:false})).ok,true);
+  assert.equal((await call({type:'state'})).overlayVisible,false);
+  assert.equal((await call({type:'send',encrypt:true,scope:'T123/C456',text:'secret'},composer)).ok,false);
   assert.equal((await call({type:'decrypt',scope:'T123/C456',text:ciphertext},page)).text,'secret');
-  await call({type:'set-enabled',enabled:true});
-  assert.equal((await call({type:'send',scope:'T123/C456',text:'secret'},composer)).ok,true);
+  await call({type:'set-overlay',visible:true});
+  assert.equal((await call({type:'send',encrypt:true,scope:'T123/C456',text:'secret'},composer)).ok,true);
   assert.equal((await call({type:'state'})).defaultKeyId,id);
 });
 test('key removal preserves other keys, clears the default without silently switching, and supports restore', async () => {
@@ -80,12 +80,12 @@ test('key removal preserves other keys, clears the default without silently swit
   const backup = (await call({type:'export',id})).value;
   assert.equal((await call({type:'delete-key',id},page)).ok,false);
   assert.equal((await call({type:'delete-key',id:'missing'})).ok,false);
-  await call({type:'send',scope:'T123/C456',text:'secret'},composer);
+  await call({type:'send',encrypt:true,scope:'T123/C456',text:'secret'},composer);
   const ciphertext = delivered.message.text;
   assert.equal((await call({type:'delete-key',id})).ok,true);
   assert.equal((await call({type:'state'})).defaultKeyId,'');
   assert.equal((await call({type:'state'})).ids.length,state.ids.length-1);
-  assert.equal((await call({type:'send',scope:'T123/C456',text:'secret'},composer)).ok,false);
+  assert.equal((await call({type:'send',encrypt:true,scope:'T123/C456',text:'secret'},composer)).ok,false);
   assert.equal((await call({type:'decrypt',scope:'T123/C456',text:ciphertext},page)).ok,false);
   assert.equal((await call({type:'export',id})).ok,false);
   assert.equal((await call({type:'import',value:backup})).ok,true);
@@ -96,16 +96,29 @@ test('key removal preserves other keys, clears the default without silently swit
   await call({type:'delete-key',id});
   assert.deepEqual((await call({type:'state'})).ids,[remaining[0]]);
   assert.equal((await call({type:'state'})).defaultKeyId,'');
-  assert.equal((await call({type:'send',scope:'T123/C456',text:'secret'},composer)).ok,false);
+  assert.equal((await call({type:'send',encrypt:true,scope:'T123/C456',text:'secret'},composer)).ok,false);
   await call({type:'set-default',id:remaining[0]});
-  assert.equal((await call({type:'send',scope:'T123/C456',text:'secret'},composer)).ok,true);
+  assert.equal((await call({type:'send',encrypt:true,scope:'T123/C456',text:'secret'},composer)).ok,true);
 });
 test('protected setting changes notify Slack content scripts through runtime messages', async () => {
-  await call({type:'set-enabled',enabled:false});
-  storageListener({encryptionEnabled:{newValue:false}},'local');
+  await call({type:'set-overlay',visible:false});
+  storageListener({overlayVisible:{newValue:false}},'local');
   await new Promise(resolve => setTimeout(resolve,20));
   assert.equal(delivered.tab,7);
-  assert.deepEqual(delivered.message,{type:'settings-changed',encryptionEnabled:false});
+  assert.deepEqual(delivered.message,{type:'settings-changed',overlayVisible:false});
   assert.deepEqual(delivered.options,{frameId:0});
-  await call({type:'set-enabled',enabled:true});
+  await call({type:'set-overlay',visible:true});
+});
+
+test('composer mode explicitly chooses plaintext without a key or encryption without fallback', async () => {
+  const previous = data.defaultKeyId; data.defaultKeyId = '';
+  const plain = '明文測試\n第二行';
+  assert.equal((await call({type:'send',encrypt:false,scope:'T123/C456',text:plain},composer)).ok,true);
+  assert.equal(delivered.message.text,plain);
+  assert.equal(delivered.message.encrypted,false);
+  assert.equal((await call({type:'send',encrypt:true,scope:'T123/C456',text:plain},composer)).ok,false);
+  assert.equal((await call({type:'send',scope:'T123/C456',text:plain},composer)).ok,false);
+  assert.equal((await call({type:'send',encrypt:'false',scope:'T123/C456',text:plain},composer)).ok,false);
+  assert.equal((await call({type:'send',encrypt:false,scope:'T123/C456',text:plain},page)).ok,false);
+  data.defaultKeyId = previous;
 });

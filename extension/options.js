@@ -5,12 +5,12 @@ async function request(message) {
   return result;
 }
 async function refresh(preferred) {
-  const {ids, defaultKeyId, encryptionEnabled} = await request({type:'state'});
+  const {ids, defaultKeyId, overlayVisible} = await request({type:'state'});
   select.replaceChildren(...ids.map(id => { const option = document.createElement('option'); option.value = id; option.textContent = id; return option; }));
   if (ids.includes(preferred || defaultKeyId)) select.value = preferred || defaultKeyId;
   document.querySelector('#default-key').textContent = defaultKeyId ? `目前預設金鑰：${defaultKeyId}` : '尚未設定預設金鑰';
-  document.querySelector('#enabled').checked = encryptionEnabled !== false;
-  document.querySelector('#encryption-state').textContent = encryptionEnabled !== false ? '🔒 已啟用：送出前加密' : '已關閉：使用 Slack 原生輸入框，送出明文';
+  document.querySelector('#show-overlay').checked = overlayVisible !== false;
+  document.querySelector('#overlay-state').textContent = overlayVisible !== false ? '已顯示覆蓋輸入框，可在輸入框內切換加密或明文' : '已隱藏覆蓋輸入框，使用 Slack 原生輸入框';
   for (const id of ['#export','#delete','#set-default']) document.querySelector(id).disabled = !ids.length;
   await refreshDrafts();
 }
@@ -64,9 +64,9 @@ action('#confirm-delete', async () => {
   await request({type:'delete-key', id:deleteId});
   dialog.close(); await refresh(); status.textContent = `已移除金鑰 ${deleteId}`;
 });
-document.querySelector('#enabled').addEventListener('change', async event => {
+document.querySelector('#show-overlay').addEventListener('change', async event => {
   const checkbox = event.target; checkbox.disabled = true;
-  try { await request({type:'set-enabled', enabled:checkbox.checked}); await refresh(); status.textContent = '加密設定已更新'; }
+  try { await request({type:'set-overlay', visible:checkbox.checked}); await refresh(); status.textContent = '覆蓋輸入框顯示設定已更新'; }
   catch (error) { checkbox.checked = !checkbox.checked; status.textContent = error.message; }
   finally { checkbox.disabled = false; }
 });

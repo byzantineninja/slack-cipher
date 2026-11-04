@@ -1,4 +1,4 @@
-.slackenc-frame { display: block !important; width: 100% !important; height: 180px !important; border: 2px solid #126b54 !important; border-radius: 8px; box-sizing: border-box; background: #fff; }
+.slackenc-frame { display: block !important; width: 100% !important; height: 210px !important; border: 2px solid #126b54 !important; border-radius: 8px; box-sizing: border-box; background: #fff; }
 .slackenc-hidden { display: none !important; }
 .slackenc-hidden.slackenc-sending { display: block !important; position: fixed !important; left: -100000px !important; top: 0 !important; width: 800px !important; pointer-events: none !important; }
 .slackenc-plaintext { white-space: pre-wrap; overflow-wrap: anywhere; border-left: 3px solid #126b54; padding-left: 8px; }

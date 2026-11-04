@@ -7,19 +7,19 @@ let queue = Promise.resolve();
 function serialize(fn) { const result = queue.then(fn); queue = result.catch(() => {}); return result; }
 const extensionPage = sender => sender.url?.startsWith(chrome.runtime.getURL(''));
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local' || !['keys','defaultKeyId','encryptionEnabled'].some(key => key in changes)) return;
+  if (area !== 'local' || !['keys','defaultKeyId','overlayVisible'].some(key => key in changes)) return;
   // Content scripts cannot observe protected local storage directly.
   (async () => {
     await ready;
-    const {encryptionEnabled = true} = await chrome.storage.local.get('encryptionEnabled');
+    const {overlayVisible = true} = await chrome.storage.local.get('overlayVisible');
     const tabs = await chrome.tabs.query({url:'https://app.slack.com/*'});
-    await Promise.all(tabs.map(tab => chrome.tabs.sendMessage(tab.id, {type:'settings-changed',encryptionEnabled}, {frameId:0}).catch(() => {})));
+    await Promise.all(tabs.map(tab => chrome.tabs.sendMessage(tab.id, {type:'settings-changed',overlayVisible}, {frameId:0}).catch(() => {})));
   })().catch(() => {});
 });
 async function handle(message, sender) {
   await ready;
-  const {keys = {}, defaultKeyId = '', encryptionEnabled = true} = await chrome.storage.local.get(['keys','defaultKeyId','encryptionEnabled']);
-  if (message.type === 'state') return {ids:Object.keys(keys), defaultKeyId, encryptionEnabled};
+  const {keys = {}, defaultKeyId = '', overlayVisible = true} = await chrome.storage.local.get(['keys','defaultKeyId','overlayVisible']);
+  if (message.type === 'state') return {ids:Object.keys(keys), defaultKeyId, overlayVisible};
   if (message.type === 'create' || message.type === 'import') {
     if (!extensionPage(sender)) throw new Error('未授權');
     return serialize(async () => {
@@ -57,10 +57,10 @@ async function handle(message, sender) {
       return {};
     });
   }
-  if (message.type === 'set-enabled') {
-    if (!extensionPage(sender) || typeof message.enabled !== 'boolean') throw new Error('無效的加密設定或未授權');
+  if (message.type === 'set-overlay') {
+    if (!extensionPage(sender) || typeof message.visible !== 'boolean') throw new Error('無效的顯示設定或未授權');
     return serialize(async () => {
-      await chrome.storage.local.set({encryptionEnabled:message.enabled}); return {};
+      await chrome.storage.local.set({overlayVisible:message.visible}); return {};
     });
   }
   if (message.type === 'decrypt') {
@@ -73,13 +73,15 @@ async function handle(message, sender) {
   if (message.type === 'send') {
     if (sender.url?.split('#')[0] !== chrome.runtime.getURL('composer.html') || !sender.tab) throw new Error('未授權');
     if (!/^T[A-Z0-9]+\/[CDG][A-Z0-9]+$/.test(message.scope)) throw new Error('無法辨識目前對話，已停止送出');
-    if (!encryptionEnabled) throw new Error('加密已關閉，請使用 Slack 原生輸入框');
+    if (!overlayVisible) throw new Error('覆蓋輸入框已隱藏，請使用 Slack 原生輸入框');
+    if (typeof message.encrypt !== 'boolean') throw new Error('請明確選擇加密或明文送出');
+    if (typeof message.text !== 'string' || !message.text.trim() || new TextEncoder().encode(message.text).length > 20000) throw new Error('請輸入 1–20000 bytes 的文字');
     const id = defaultKeyId;
-    if (!id || !keys[id]) throw new Error('尚未設定預設金鑰，已停止送出');
-    const text = await encrypt(message.text, id, keys[id], message.scope);
-    const latest = await chrome.storage.local.get(['keys','encryptionEnabled']);
-    if (latest.encryptionEnabled === false || latest.keys?.[id] !== keys[id]) throw new Error('加密設定或金鑰已變更，請重試');
-    const response = await chrome.tabs.sendMessage(sender.tab.id, {type:'deliver', text, scope:message.scope, composer:message.composer}, {frameId:0});
+    if (message.encrypt && (!id || !keys[id])) throw new Error('尚未設定預設金鑰，已停止送出');
+    const text = message.encrypt ? await encrypt(message.text, id, keys[id], message.scope) : message.text;
+    const latest = await chrome.storage.local.get(['keys','overlayVisible']);
+    if (latest.overlayVisible === false || (message.encrypt && latest.keys?.[id] !== keys[id])) throw new Error('顯示設定或金鑰已變更，請重試');
+    const response = await chrome.tabs.sendMessage(sender.tab.id, {type:'deliver', text, encrypted:message.encrypt, scope:message.scope, composer:message.composer}, {frameId:0});
     if (!response?.ok) throw new Error(response?.error || 'Slack 未接受密文，草稿已保留');
     return {};
   }
