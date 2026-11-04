@@ -19,8 +19,17 @@ test('compact ciphertext uses only the Unicode prefix and round trips correctly'
   const key = toHex(crypto.getRandomValues(new Uint8Array(32))), id = keyId(key);
   const plain = '測試訊息'.repeat(100), scope = 'T123/C456';
   const compact = await encrypt(plain,id,key,scope);
-  assert.match(compact,new RegExp(`^⚿:${id}:[\\u4e00-\\u8dff]+[\\u4e00-\\u4e0d]$`));
+  assert.match(compact,/^[\u3400-\u4dbf]{13}[\u4e00-\u8dff]+[\u3400-\u4dbf]$/);
   assert.equal(await decrypt(compact,key,scope),plain);
   const length = parseEnvelope(compact).bytes.length;
-  assert.equal(compact.split(':')[2].length,Math.ceil(length * 8 / 14) + 1);
+  assert.equal(compact.length - 13,Math.ceil(length * 8 / 14) + 1);
+});
+
+test('random padding round trips across alignments', () => {
+  for (let length = 1; length <= 100; length++) {
+    const bytes = crypto.getRandomValues(new Uint8Array(length));
+    const values = new Set(Array.from({length: 8}, () => encodeCompact(bytes, true)));
+    assert.ok(values.size > 1);
+    for (const value of values) assert.deepEqual(decodeCompact(value, true), bytes);
+  }
 });
