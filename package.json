@@ -1,0 +1,11 @@
+{
+  "name": "slack-cipher",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.3"
+  }
+}

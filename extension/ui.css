@@ -1,0 +1,13 @@
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; font-size: 14px; }
+body { margin: 0; background: light-dark(#fff,#202124); color: light-dark(#202124,#eee); }
+.settings { box-sizing: border-box; min-width: 390px; max-width: 640px; padding: 24px; }
+h1 { font-size: 24px; margin-top: 0; } h2 { font-size: 18px; }
+p { line-height: 1.6; } label { display: block; margin: 16px 0; }
+input, select, textarea { box-sizing: border-box; display: block; width: 100%; margin-top: 6px; padding: 8px; border: 1px solid #888; border-radius: 6px; font: inherit; }
+button { padding: 8px 12px; border: 0; border-radius: 6px; background: #126b54; color: white; cursor: pointer; font: inherit; }
+button:disabled { opacity: .5; cursor: default; } .secondary { background: #666; }
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.composer { padding: 10px; box-sizing: border-box; } .composer textarea { resize: none; height: 78px; margin: 8px 0; }
+#key, #status, .note { font-size: 12px; } #status { overflow-wrap: anywhere; } pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.danger { background: #a12b35; } .toggle { display: flex; align-items: center; gap: 8px; } .toggle input { width: auto; margin: 0; } dialog { max-width: 320px; border: 1px solid #888; border-radius: 8px; } dialog::backdrop { background: #0007; }

@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Slack Cipher",
+  "version": "0.1.0",
+  "description": "在本機加密 Slack 訊息，並在閱讀時解密。",
+  "minimum_chrome_version": "111",
+  "permissions": ["storage"],
+  "host_permissions": ["https://app.slack.com/*"],
+  "background": {"service_worker": "background.js", "type": "module"},
+  "action": {"default_title": "Slack Cipher 金鑰設定", "default_popup": "options.html"},
+  "options_page": "options.html",
+  "content_scripts": [{"matches": ["https://app.slack.com/*"], "js": ["content.js"], "css": ["content.css"]}],
+  "web_accessible_resources": [{"resources": ["composer.html", "composer.js", "ui.css"], "matches": ["https://app.slack.com/*"]}]
+}
