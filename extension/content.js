@@ -135,7 +135,7 @@
       if (rendered.has(node) || node.closest(ROOT) || node.closest(EDITOR) || node.parentElement?.closest(MESSAGE)) return;
       const source = node.textContent;
       const wire = source.trim();
-      if (!/^⚿:/.test(wire)) return;
+      if (!/^(?:⚿:|[\u3400-\u4dbf])/.test(wire)) return;
       const view = document.createElement('div'); view.className = 'slackenc-plaintext'; view.textContent = '🔒 解密中…';
       const target = context(node);
       if (!target) return;
@@ -184,7 +184,7 @@
       if (!runtimeAvailable()) throw new Error(reloadMessage);
       if (!overlayVisible || !item || item.busy || item.scope !== message.scope || !sameContext(item) || !item.editor.isConnected) throw new Error('頻道或輸入框已變更，草稿已保留');
       if (typeof message.encrypted !== 'boolean' || typeof message.text !== 'string' || !message.text.trim()) throw new Error('無效的訊息送出模式');
-      if (message.encrypted && !/^⚿:[A-Za-z0-9]{12}:[\u4e00-\u8dff]+[\u4e00-\u4e0d]$/.test(message.text)) throw new Error('拒絕傳送非密文');
+      if (message.encrypted && !/^(?:⚿:[A-Za-z0-9]{12}:[\u4e00-\u8dff]+[\u4e00-\u4e0d]|[\u3400-\u4dbf]{13}[\u4e00-\u8dff]+[\u3400-\u4dbf])$/.test(message.text)) throw new Error('拒絕傳送非密文');
       if (item.editor.textContent.trim()) throw new Error('Slack 原生輸入框有草稿或待確認密文。請暫時停用擴充套件並處理草稿後重試');
       item.busy = true;
       try {

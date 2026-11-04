@@ -22,7 +22,7 @@ test('reject wrong key, wrong channel, altered ciphertext and altered key ID', a
   await assert.rejects(decrypt(text,key,'T123/C789'));
   const {bytes} = parseEnvelope(text); bytes[bytes.length-1] ^= 1;
   await assert.rejects(decrypt(`⚿:${id}:${encodeCompact(bytes)}`,key,scope));
-  await assert.rejects(decrypt(text.replace(id,keyId(raw())),key,scope));
+  await assert.rejects(decrypt(text.slice(0,1) + String.fromCharCode(0x3400 + ((text.charCodeAt(1) - 0x3400 + 1) % 62)) + text.slice(2),key,scope));
 });
 test('reject invalid envelopes, keys, blank or oversized messages', async () => {
   for (const text of ['hello','⚿:short:一丆','⚿:abcdefghijkl:!!!!','⚿:abcdefghijkl:一丆']) assert.throws(() => parseEnvelope(text));

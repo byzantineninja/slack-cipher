@@ -34,11 +34,11 @@ Chrome Manifest V3 擴充套件原型：在 extension-origin iframe 輸入明文
 
 ## 格式與安全邊界
 
-`⚿:<12 碼 key ID>:<漢字編碼 envelope><補位數>`
+`<Extension A 標記><12 碼 Extension A key ID><漢字編碼 envelope><Extension A 補位碼>`
 
-訊息使用非 emoji 的 Unicode 字元 `⚿`（U+26BF）作為前綴，避免 Slack 的 emoji 圖片或短碼轉換。
+訊息以隨機 CJK Extension A 字元（U+3400–U+4DBF）開頭，降低一般中文訊息觸發解密的機率。key ID 和補位碼也使用隨機 Extension A 字元，分別取餘數 62 和 14 還原。舊版 `⚿:` 格式仍可解密；取餘數可還原 ID，因此此方法不提供金鑰使用的不可連結性。
 
-密文以每字元 14 bits 的漢字編碼（U+4E00–U+8DFF）傳送，最後一碼以漢字 U+4E00 加上補位 bit 數（0–13）表示，因此密文內容全部由漢字組成。這僅縮短字元數；漢字通常較寬，UTF-8 傳輸位元組數也不會減少。256-bit 金鑰以單行 64 碼 hex 交換，不包含識別碼或其他欄位。
+密文以每字元 14 bits 的漢字編碼（U+4E00–U+8DFF）傳送，最後一碼以 Extension A 字元取餘數表示補位 bit 數（0–13），因此密文內容全部由漢字組成。這僅縮短字元數；漢字通常較寬，UTF-8 傳輸位元組數也不會減少。256-bit 金鑰以單行 64 碼 hex 交換，不包含識別碼或其他欄位。
 
 - 金鑰使用 CSPRNG 產生；ID 為原始金鑰 bytes 的 MD5 衍生之 12 碼 Base62，只用於識別，不用於加密或密碼衍生。同一 ID 不允許匯入不同金鑰。
 - Envelope 是 1-byte 格式版本、12-byte 隨機 nonce、AES-GCM ciphertext 與 128-bit tag。版本與 key ID 分開，版本不是 key 代號。
