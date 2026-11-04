@@ -6,7 +6,28 @@
   const SEND = '[data-qa="texty_send_button"]';
   const composers = new Map();
   const rendered = new Map();
-  let route = '', scheduled = false, encryptionEnabled = true;
+  let route = '', scheduled = false, encryptionEnabled = true, stopped = false;
+  let extensionId, composerUrl, scanTimer, pollTimer, observer;
+  const reloadMessage = 'Slack Cipher 已更新或停用，請先複製未送出草稿，再重新整理 Slack。';
+  function invalidate() {
+    if (stopped) return;
+    stopped = true; scheduled = false;
+    clearTimeout(scanTimer); clearInterval(pollTimer); observer?.disconnect();
+    window.removeEventListener('popstate', schedule);
+    restoreMessages();
+    // Keep existing drafts visible and native composers protected until reload.
+    for (const {root} of composers.values()) root.classList.remove('slackenc-sending');
+    const notice = document.createElement('div'); notice.className = 'slackenc-reload-notice'; notice.setAttribute('role','alert');
+    const text = document.createElement('span'); text.textContent = reloadMessage;
+    const button = document.createElement('button'); button.textContent = '重新整理 Slack';
+    button.addEventListener('click', () => location.reload());
+    notice.append(text,button); document.documentElement.append(notice);
+  }
+  function runtimeAvailable() {
+    if (stopped) return false;
+    try { if (extensionId && chrome.runtime.id === extensionId) return true; } catch {}
+    invalidate(); return false;
+  }
   function workspace() { return location.pathname.match(/^\/client\/(T[A-Z0-9]+)(?:\/|$)/)?.[1] || ''; }
   function currentScope() {
     const match = location.pathname.match(/^\/client\/(T[A-Z0-9]+)\/([CDG][A-Z0-9]+)(?:\/|$)/);
@@ -57,9 +78,16 @@
     return !next ? !item.scope : next.scope === item.scope && next.thread === item.thread && next.pane === item.pane;
   }
   async function request(message) {
-    const result = await chrome.runtime.sendMessage(message);
-    if (!result?.ok) throw new Error(result?.error || '擴充套件無回應');
-    return result;
+    if (!runtimeAvailable()) throw new Error(reloadMessage);
+    try {
+      const result = await chrome.runtime.sendMessage(message);
+      if (!runtimeAvailable()) throw new Error(reloadMessage);
+      if (!result?.ok) throw new Error(result?.error || '擴充套件無回應');
+      return result;
+    } catch (error) {
+      if (/extension context invalidated/i.test(error.message) || !runtimeAvailable()) { invalidate(); throw new Error(reloadMessage); }
+      throw error;
+    }
   }
   function restoreComposers() {
     for (const {root,frame} of composers.values()) { root.classList.remove('slackenc-hidden'); frame.remove(); }
@@ -85,7 +113,7 @@
       const id = crypto.randomUUID();
       const frame = document.createElement('iframe');
       frame.className = 'slackenc-frame'; frame.title = target?.thread ? 'Slack Cipher 對話串安全輸入框' : 'Slack Cipher 安全輸入框';
-      frame.src = chrome.runtime.getURL('composer.html') + '#' + new URLSearchParams({scope:target?.scope || '', thread:target?.thread || '', composer:id});
+      frame.src = composerUrl + '#' + new URLSearchParams({scope:target?.scope || '', thread:target?.thread || '', composer:id});
       // Preserve any pre-existing native draft rather than silently replacing it.
       if (editor.textContent.trim()) {
         frame.title += '（原生草稿仍保留，請先處理草稿）';
@@ -123,12 +151,13 @@
   }
   function scan() {
     scheduled = false;
+    if (!runtimeAvailable()) return;
     const nextRoute = location.pathname;
     if (route !== nextRoute) { restoreComposers(); restoreMessages(); route = nextRoute; }
     installComposers();
     if (workspace()) readMessages();
   }
-  function schedule() { if (!scheduled) { scheduled = true; setTimeout(scan, 100); } }
+  function schedule() { if (!stopped && !scheduled) { scheduled = true; scanTimer = setTimeout(scan, 100); } }
   // Guard hidden native composers against accidental plaintext input or submission.
   for (const type of ['keydown','beforeinput','paste','drop','click','submit']) {
     document.addEventListener(type, event => {
@@ -138,16 +167,19 @@
       if (root) { event.preventDefault(); event.stopImmediatePropagation(); }
     }, true);
   }
-  chrome.runtime.onMessage.addListener((message, sender, respond) => {
-    if (sender.id !== chrome.runtime.id) return;
+  const onMessage = (message, sender, respond) => {
+    if (sender.id !== extensionId) return;
+    const reply = result => { try { respond(result); } catch { invalidate(); } };
+    if (!runtimeAvailable()) { reply({ok:false,error:reloadMessage}); return; }
     if (message.type === 'settings-changed') {
       encryptionEnabled = message.encryptionEnabled !== false;
       if (!encryptionEnabled) restoreComposers();
-      restoreMessages(); schedule(); respond({ok:true}); return;
+      restoreMessages(); schedule(); reply({ok:true}); return;
     }
-    if (message.type !== 'deliver' || sender.id !== chrome.runtime.id) return;
+    if (message.type !== 'deliver') return;
     const item = composers.get(message.composer);
     async function deliver() {
+      if (!runtimeAvailable()) throw new Error(reloadMessage);
       if (!encryptionEnabled || !item || item.busy || item.scope !== message.scope || !sameContext(item) || !item.editor.isConnected) throw new Error('頻道或輸入框已變更，草稿已保留');
       if (!/^⚿:[A-Za-z0-9]{12}:~[\u4e00-\u8dff]+[0-9a-d]$/.test(message.text)) throw new Error('拒絕傳送非密文');
       if (item.editor.textContent.trim()) throw new Error('Slack 原生輸入框有草稿或待確認密文。請暫時停用擴充套件並處理草稿後重試');
@@ -160,6 +192,7 @@
         // execCommand updates Slack's contenteditable model and emits its input event.
         if (!document.execCommand('insertText', false, message.text)) throw new Error('無法填入 Slack 輸入框');
         await new Promise(resolve => setTimeout(resolve, 100));
+        if (!runtimeAvailable()) throw new Error(reloadMessage);
         if (!encryptionEnabled || !sameContext(item) || !item.editor.isConnected || item.editor.textContent.trim() !== message.text) throw new Error('Slack 輸入內容不符，已停止送出');
         const button = item.root.querySelector(SEND);
         if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') throw new Error('找不到可用的 Slack 送出按鈕');
@@ -167,22 +200,30 @@
         // A click is not an acknowledgement: wait for Slack to consume the draft.
         for (let i = 0; i < 40; i++) {
           await new Promise(resolve => setTimeout(resolve, 100));
+          if (!runtimeAvailable()) throw new Error(reloadMessage);
           if (!sameContext(item) || !item.editor.isConnected) throw new Error('頁面已切換，請確認是否送達，避免重複送出');
           if (!item.editor.textContent.trim()) return;
         }
         throw new Error('Slack 尚未清空密文草稿，請確認是否送達；不會自動重送');
       } finally { item.root.classList.remove('slackenc-sending'); item.frame.focus(); item.busy = false; }
     }
-    deliver().then(() => respond({ok:true}), error => respond({ok:false,error:error.message}));
+    deliver().then(() => reply({ok:true}), error => reply({ok:false,error:error.message}));
     return true;
-  });
+  };
   async function refresh() {
     try { const state = await request({type:'state'}); encryptionEnabled = state.encryptionEnabled !== false; restoreMessages(); schedule(); }
     catch { /* Existing protected composers stay blocked if the worker is unavailable. */ }
   }
-  new MutationObserver(schedule).observe(document.documentElement, {childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['href']});
+  try {
+    extensionId = chrome.runtime.id;
+    composerUrl = chrome.runtime.getURL('composer.html');
+    if (!runtimeAvailable()) return;
+    chrome.runtime.onMessage.addListener(onMessage);
+  } catch { invalidate(); return; }
+  observer = new MutationObserver(schedule);
+  observer.observe(document.documentElement, {childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['href']});
   window.addEventListener('popstate', schedule);
-  setInterval(schedule, 1000);
+  pollTimer = setInterval(schedule, 1000);
   schedule();
   refresh();
 })();

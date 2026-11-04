@@ -3,3 +3,6 @@
 .slackenc-hidden.slackenc-sending { display: block !important; position: fixed !important; left: -100000px !important; top: 0 !important; width: 800px !important; pointer-events: none !important; }
 .slackenc-plaintext { white-space: pre-wrap; overflow-wrap: anywhere; border-left: 3px solid #126b54; padding-left: 8px; }
 .slackenc-error { color: #a35200; font-size: 12px; }
+
+.slackenc-reload-notice { position: fixed; bottom: 12px; left: 12px; right: 12px; z-index: 2147483647; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border: 1px solid #bd8a25; border-radius: 8px; background: #fff3cd; color: #332701; font: 14px/1.5 system-ui, sans-serif; }
+.slackenc-reload-notice button { flex-shrink: 0; padding: 6px 12px; cursor: pointer; }

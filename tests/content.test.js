@@ -10,10 +10,12 @@ const wait = ms => new Promise(resolve => setTimeout(resolve,ms));
 function fixture({draft = '', decryptError = false, noKey = false, workerDown = false} = {}) {
   const dom = new JSDOM(`<div data-qa="message-text">${cipher}</div><div class="p-message_input"><div class="ql-editor" contenteditable="true" role="textbox">${draft}</div><button data-qa="texty_send_button">Send</button></div>`, {url:'https://app.slack.com/client/T123/C456',runScripts:'outside-only',pretendToBeVisual:true});
   const {window:w} = dom;
-  let listener, sent = [], sentTargets = [], decryptRequests = [], enabled = true;
+  let listener, sent = [], sentTargets = [], decryptRequests = [], enabled = true, rejectNext = false, runtimeCalls = 0;
   const editor = w.document.querySelector('.ql-editor');
   w.chrome = {
     runtime:{id:'test',getURL:path => `chrome-extension://test/${path}`, onMessage:{addListener:fn => {listener = fn;}},async sendMessage(message) {
+      runtimeCalls++;
+      if (rejectNext) { rejectNext = false; throw new Error('Extension context invalidated.'); }
       if (message.type === 'state') {
         if (workerDown) throw new Error('worker unavailable');
         return {ok:true,defaultKeyId:noKey ? '' : 'abcdefghijkl',encryptionEnabled:enabled};
@@ -30,7 +32,7 @@ function fixture({draft = '', decryptError = false, noKey = false, workerDown = 
     sent.push(target.textContent); sentTargets.push(target); target.textContent = '';
   });
   w.eval(script);
-  return {dom,w,editor,sent,sentTargets,decryptRequests,setEnabled:async value => { enabled = value; listener({type:'settings-changed',encryptionEnabled:value},{id:'test'},() => {}); },deliver:message => new Promise(resolve => listener({type:'deliver',text:cipher,scope,...message},{id:'test'},resolve))};
+  return {dom,w,editor,sent,sentTargets,decryptRequests,get runtimeCalls() { return runtimeCalls; },rejectNextRequest:() => { rejectNext = true; },setEnabled:async value => { enabled = value; listener({type:'settings-changed',encryptionEnabled:value},{id:'test'},() => {}); },deliver:message => new Promise(resolve => listener({type:'deliver',text:cipher,scope,...message},{id:'test'},resolve))};
 }
 test('replace native composer, safely render plaintext, deliver ciphertext and restore on navigation', async t => {
   const f = fixture(); t.after(() => f.dom.window.close()); await wait(250);
@@ -162,4 +164,48 @@ test('thread list routes resolve the conversation from the thread permalink', as
   assert.equal(params.get('scope'),'T123/D789');
   assert.equal((await f.deliver({composer:params.get('composer'),scope:'T123/D789'})).ok,true);
   assert.equal(f.sentTargets[0],thread.editor);
+});
+
+test('invalidated runtime stops old scans, preserves drafts, and shows a single reload notice', async t => {
+  const f = fixture({draft:'native draft'}); t.after(() => f.dom.window.close()); await wait(200);
+  const frame = f.w.document.querySelector('iframe');
+  const old = frameParams(frame).get('composer');
+  f.w.chrome.runtime.id = undefined;
+  f.w.chrome.runtime.getURL = () => { throw new Error('Extension context invalidated.'); };
+  addThread(f); await wait(220);
+  const calls = f.runtimeCalls;
+  assert.equal(f.w.document.querySelectorAll('.slackenc-reload-notice').length,1);
+  assert.equal(f.w.document.querySelector('iframe'),frame);
+  assert.equal(f.editor.textContent,'native draft');
+  assert.ok(f.editor.closest('.p-message_input').classList.contains('slackenc-hidden'));
+  assert.equal(f.w.document.querySelector('.slackenc-plaintext'),null);
+  assert.equal((await f.deliver({composer:old})).ok,false);
+  await wait(1100);
+  assert.equal(f.runtimeCalls,calls);
+  assert.equal(f.w.document.querySelectorAll('.slackenc-reload-notice').length,1);
+  assert.equal(f.w.document.querySelectorAll('iframe').length,1);
+  assert.equal(f.sent.length,0);
+});
+test('runtime invalidation reported by a rejected message is handled without an uncaught error', async t => {
+  const f = fixture(); t.after(() => f.dom.window.close()); await wait(200);
+  f.rejectNextRequest();
+  const node = f.w.document.createElement('div'); node.setAttribute('data-qa','message-text'); node.textContent = cipher;
+  f.w.document.body.append(node); await wait(220);
+  assert.equal(f.w.document.querySelectorAll('.slackenc-reload-notice').length,1);
+  assert.equal(node.classList.contains('slackenc-hidden'),false);
+  assert.equal(f.w.document.querySelector('.slackenc-error'),null);
+});
+test('invalidation during insertion stops delivery before clicking send', async t => {
+  const f = fixture(); t.after(() => f.dom.window.close()); await wait(200);
+  const composer = frameParams(f.w.document.querySelector('iframe')).get('composer');
+  const insert = f.w.document.execCommand;
+  f.w.document.execCommand = (...args) => {
+    const result = insert(...args); f.w.chrome.runtime.id = undefined; return result;
+  };
+  const result = await f.deliver({composer});
+  assert.equal(result.ok,false); assert.match(result.error,/重新整理/);
+  assert.equal(f.sent.length,0);
+  assert.equal(f.editor.textContent,cipher);
+  assert.ok(f.editor.closest('.p-message_input').classList.contains('slackenc-hidden'));
+  assert.equal(f.editor.closest('.p-message_input').classList.contains('slackenc-sending'),false);
 });
