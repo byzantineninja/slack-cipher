@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "在本機加密 Slack 訊息，並在閱讀時解密。",
   "minimum_chrome_version": "111",
-  "permissions": ["storage"],
+  "permissions": ["storage", "clipboardWrite"],
   "host_permissions": ["https://app.slack.com/*"],
   "background": {"service_worker": "background.js", "type": "module"},
   "action": {"default_title": "Slack Cipher 金鑰設定", "default_popup": "options.html"},

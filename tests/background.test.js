@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {toHex} from '../extension/crypto.js';
+import {keyId} from '../extension/crypto.js';
 let listener, storageListener, accessLevel, delivered;
 const data = {};
 globalThis.chrome = {
@@ -33,11 +33,10 @@ test('key lifecycle, protected storage, global default key and encrypted send', 
   assert.equal(plain.text,'秘密');
   assert.equal((await call({type:'decrypt',scope:'T123/C999',text:delivered.message.text},page)).ok,false);
   const exported = await call({type:'export',id});
-  assert.equal(JSON.parse(exported.value).encoding,'hex');
-  assert.match(JSON.parse(exported.value).key,/^[0-9a-f]{64}$/);
-  assert.equal((await call({type:'import',value:exported.value})).ok,true);
-  const altered = JSON.parse(exported.value); altered.key = toHex(crypto.getRandomValues(new Uint8Array(32)));
-  assert.equal((await call({type:'import',value:JSON.stringify(altered)})).ok,false);
+  assert.match(exported.value,/^[0-9a-f]{64}$/);
+  assert.equal(keyId(exported.value),id);
+  assert.equal((await call({type:'import',value:exported.value})).id,id);
+  assert.equal((await call({type:'import',value:'invalid key'})).ok,false);
   for (const scope of ['T123/C999','T123/D999','T999/G999']) {
     assert.equal((await call({type:'send',encrypt:true,scope,text:'secret'},composer)).ok,true);
     assert.equal((await call({type:'decrypt',scope,text:delivered.message.text},page)).text,'secret');
@@ -121,4 +120,24 @@ test('composer mode explicitly chooses plaintext without a key or encryption wit
   assert.equal((await call({type:'send',encrypt:'false',scope:'T123/C456',text:plain},composer)).ok,false);
   assert.equal((await call({type:'send',encrypt:false,scope:'T123/C456',text:plain},page)).ok,false);
   data.defaultKeyId = previous;
+});
+
+test('pasted keys derive their own ID, deduplicate, and reject malformed text', async () => {
+  const key = 'bc'.repeat(32), id = keyId(key);
+  assert.equal((await call({type:'import',value:`  ${key.toUpperCase()}\n`})).id,id);
+  const count = (await call({type:'state'})).ids.length;
+  assert.equal((await call({type:'import',value:key})).id,id);
+  assert.equal((await call({type:'state'})).ids.length,count);
+  for (const value of ['', 'abc', 'zz'.repeat(32), 'a'.repeat(63), `${key.slice(0,32)}\n${key.slice(32)}`, null]) {
+    assert.equal((await call({type:'import',value})).ok,false);
+  }
+  assert.equal((await call({type:'export',id})).value,key);
+});
+test('short ID collisions cannot overwrite an existing key', async () => {
+  const incoming = 'ef'.repeat(32), id = keyId(incoming), existing = 'cd'.repeat(32);
+  data.keys[id] = existing;
+  const result = await call({type:'import',value:incoming});
+  assert.equal(result.ok,false); assert.match(result.error,/拒絕覆寫/);
+  assert.equal(data.keys[id],existing);
+  delete data.keys[id];
 });

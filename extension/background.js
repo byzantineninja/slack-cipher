@@ -1,4 +1,4 @@
-import {randomId, toHex, fromHex, encrypt, decrypt, parseEnvelope} from './crypto.js';
+import {keyId, toHex, encrypt, decrypt, parseEnvelope} from './crypto.js';
 const ready = Promise.all([
   chrome.storage.local.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'}),
   chrome.storage.session.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'})
@@ -26,13 +26,13 @@ async function handle(message, sender) {
       const {keys = {}, defaultKeyId = ''} = await chrome.storage.local.get(['keys','defaultKeyId']);
       let id, key;
       if (message.type === 'create') {
-        do { id = randomId(); } while (keys[id]);
-        key = toHex(crypto.getRandomValues(new Uint8Array(32)));
+        do { key = toHex(crypto.getRandomValues(new Uint8Array(32))); id = keyId(key); } while (keys[id]);
       } else {
-        const data = JSON.parse(message.value);
-        id = data.id; key = data.key;
-        if (data.format !== 'slack-encrypt-key' || data.encoding !== 'hex' || !/^[A-Za-z0-9]{12}$/.test(id) || typeof key !== 'string' || fromHex(key).length !== 32) throw new Error('金鑰檔格式錯誤');
-        if (keys[id] && keys[id] !== key) throw new Error('代號已對應其他金鑰，拒絕覆寫');
+        if (typeof message.value !== 'string') throw new Error('請貼上單行金鑰');
+        key = message.value.trim().toLowerCase();
+        if (!/^[0-9a-f]{64}$/.test(key)) throw new Error('請貼上 64 碼 hex 金鑰');
+        id = keyId(key);
+        if (keys[id] && keys[id] !== key) throw new Error('識別碼已對應其他金鑰，拒絕覆寫');
       }
       keys[id] = key;
       await chrome.storage.local.set({keys, defaultKeyId:defaultKeyId || id});
@@ -41,7 +41,7 @@ async function handle(message, sender) {
   }
   if (message.type === 'export') {
     if (!extensionPage(sender) || !keys[message.id]) throw new Error('找不到金鑰');
-    return {value:JSON.stringify({format:'slack-encrypt-key', encoding:'hex', id:message.id, key:keys[message.id]}, null, 2)};
+    return {value:keys[message.id]};
   }
   if (message.type === 'set-default' || message.type === 'delete-key') {
     if (!extensionPage(sender)) throw new Error('未授權');

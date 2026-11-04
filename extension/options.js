@@ -33,17 +33,13 @@ function action(id, fn) {
 action('#create', async () => { const {id} = await request({type:'create'}); await refresh(id); status.textContent = `已建立 ${id}`; });
 action('#export', async () => {
   const {value} = await request({type:'export', id:select.value});
-  const url = URL.createObjectURL(new Blob([value], {type:'application/json'}));
-  const a = document.createElement('a'); a.href = url; a.download = `slack-cipher-${select.value}.json`; a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  await navigator.clipboard.writeText(value);
+  status.textContent = '金鑰已複製到剪貼簿';
 });
-document.querySelector('#import').addEventListener('change', async event => {
-  try {
-    const file = event.target.files[0]; if (!file) return;
-    if (file.size > 4096) throw new Error('金鑰檔過大');
-    const {id} = await request({type:'import', value:await file.text()}); await refresh(id); status.textContent = `已匯入 ${id}`;
-  } catch (error) { status.textContent = error.message; }
-  finally { event.target.value = ''; }
+action('#import', async () => {
+  const input = document.querySelector('#import-key');
+  const {id} = await request({type:'import',value:input.value});
+  input.value = ''; await refresh(id); status.textContent = `已匯入 ${id}`;
 });
 action('#set-default', async () => {
   await request({type:'set-default', id:select.value});

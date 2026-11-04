@@ -1,3 +1,4 @@
+import {md5} from './hash.js';
 import {encodeCompact, decodeCompact} from './encoding.js';
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -6,14 +7,12 @@ export function fromHex(value) {
   if (typeof value !== 'string' || !/^(?:[0-9a-f]{2})+$/.test(value)) throw new Error('無效的 hex 金鑰');
   return Uint8Array.from(value.match(/../g), pair => parseInt(pair, 16));
 }
-export function randomId() {
+export function keyId(raw) {
+  const bytes = fromHex(raw);
+  if (bytes.length !== 32) throw new Error('金鑰必須為 256 bits');
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let id = '';
-  while (id.length < 12) {
-    for (const n of crypto.getRandomValues(new Uint8Array(16))) {
-      if (n < 248 && id.length < 12) id += alphabet[n % 62];
-    }
-  }
+  let value = BigInt(`0x${md5(bytes)}`), id = '';
+  for (let i = 0; i < 12; i++) { id = alphabet[Number(value % 62n)] + id; value /= 62n; }
   return id;
 }
 export function parseEnvelope(text) {
@@ -30,7 +29,7 @@ async function importKey(raw, usage) {
 }
 const aad = (id, scope) => encoder.encode(JSON.stringify(['slack-encrypt', 1, id, scope]));
 export async function encrypt(text, id, raw, scope) {
-  if (!/^[A-Za-z0-9]{12}$/.test(id) || !scope) throw new Error('金鑰或頻道無效');
+  if (!/^[A-Za-z0-9]{12}$/.test(id) || id !== keyId(raw) || !scope) throw new Error('金鑰或頻道無效');
   if (!text.trim() || encoder.encode(text).length > 20000) throw new Error('請輸入 1–20000 bytes 的文字');
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encrypted = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv, additionalData:aad(id, scope)}, await importKey(raw, 'encrypt'), encoder.encode(text)));
