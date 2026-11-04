@@ -6,6 +6,16 @@ const ready = Promise.all([
 let queue = Promise.resolve();
 function serialize(fn) { const result = queue.then(fn); queue = result.catch(() => {}); return result; }
 const extensionPage = sender => sender.url?.startsWith(chrome.runtime.getURL(''));
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !['keys','defaultKeyId','encryptionEnabled'].some(key => key in changes)) return;
+  // Content scripts cannot observe protected local storage directly.
+  (async () => {
+    await ready;
+    const {encryptionEnabled = true} = await chrome.storage.local.get('encryptionEnabled');
+    const tabs = await chrome.tabs.query({url:'https://app.slack.com/*'});
+    await Promise.all(tabs.map(tab => chrome.tabs.sendMessage(tab.id, {type:'settings-changed',encryptionEnabled}, {frameId:0}).catch(() => {})));
+  })().catch(() => {});
+});
 async function handle(message, sender) {
   await ready;
   const {keys = {}, defaultKeyId = '', encryptionEnabled = true} = await chrome.storage.local.get(['keys','defaultKeyId','encryptionEnabled']);

@@ -1,16 +1,16 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {toHex} from '../extension/crypto.js';
-let listener, accessLevel, delivered;
+let listener, storageListener, accessLevel, delivered;
 const data = {};
 globalThis.chrome = {
-  storage:{session:{async setAccessLevel() {}},local:{
+  storage:{onChanged:{addListener:fn => { storageListener = fn; }},session:{async setAccessLevel() {}},local:{
     async setAccessLevel(value) { accessLevel = value.accessLevel; },
     async get(fields) { return Object.fromEntries((typeof fields === 'string' ? [fields] : fields).filter(k => k in data).map(k => [k,structuredClone(data[k])])); },
     async set(value) { Object.assign(data,structuredClone(value)); }
   }},
   runtime:{getURL:path => `chrome-extension://test/${path}`,onMessage:{addListener:fn => { listener = fn; }}},
-  tabs:{async sendMessage(tab,message,options) { delivered = {tab,message,options}; return {ok:true}; }}
+  tabs:{async query() { return [{id:7}]; },async sendMessage(tab,message,options) { delivered = {tab,message,options}; return {ok:true}; }}
 };
 await import('../extension/background.js');
 const trusted = {url:'chrome-extension://test/options.html'};
@@ -99,4 +99,13 @@ test('key removal preserves other keys, clears the default without silently swit
   assert.equal((await call({type:'send',scope:'T123/C456',text:'secret'},composer)).ok,false);
   await call({type:'set-default',id:remaining[0]});
   assert.equal((await call({type:'send',scope:'T123/C456',text:'secret'},composer)).ok,true);
+});
+test('protected setting changes notify Slack content scripts through runtime messages', async () => {
+  await call({type:'set-enabled',enabled:false});
+  storageListener({encryptionEnabled:{newValue:false}},'local');
+  await new Promise(resolve => setTimeout(resolve,20));
+  assert.equal(delivered.tab,7);
+  assert.deepEqual(delivered.message,{type:'settings-changed',encryptionEnabled:false});
+  assert.deepEqual(delivered.options,{frameId:0});
+  await call({type:'set-enabled',enabled:true});
 });

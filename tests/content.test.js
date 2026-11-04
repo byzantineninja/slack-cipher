@@ -10,7 +10,7 @@ const wait = ms => new Promise(resolve => setTimeout(resolve,ms));
 function fixture({draft = '', decryptError = false, noKey = false, workerDown = false} = {}) {
   const dom = new JSDOM(`<div data-qa="message-text">${cipher}</div><div class="p-message_input"><div class="ql-editor" contenteditable="true" role="textbox">${draft}</div><button data-qa="texty_send_button">Send</button></div>`, {url:'https://app.slack.com/client/T123/C456',runScripts:'outside-only',pretendToBeVisual:true});
   const {window:w} = dom;
-  let listener, sent = [], changes, enabled = true;
+  let listener, sent = [], enabled = true;
   const editor = w.document.querySelector('.ql-editor');
   w.chrome = {
     runtime:{id:'test',getURL:path => `chrome-extension://test/${path}`, onMessage:{addListener:fn => {listener = fn;}},async sendMessage(message) {
@@ -19,12 +19,12 @@ function fixture({draft = '', decryptError = false, noKey = false, workerDown = 
         return {ok:true,defaultKeyId:noKey ? '' : 'abcdefghijkl',encryptionEnabled:enabled};
       }
       if (message.type === 'decrypt') return decryptError || message.scope !== scope ? {ok:false,error:'尚未設定金鑰或頻道不符'} : {ok:true,text:'<img src=x onerror=alert(1)>秘密'};
-    }}, storage:{onChanged:{addListener:fn => {changes = fn;}}}
+    }}
   };
   w.document.execCommand = (command, _, text) => { assert.equal(command,'insertText'); editor.textContent = text; return true; };
   w.document.querySelector('button').addEventListener('click',() => { sent.push(editor.textContent); editor.textContent = ''; });
   w.eval(script);
-  return {dom,w,editor,sent,setEnabled:async value => { enabled = value; await changes({},'local'); },changed:() => changes({},'local'),deliver:message => new Promise(resolve => listener({type:'deliver',text:cipher,scope,...message},{id:'test'},resolve))};
+  return {dom,w,editor,sent,setEnabled:async value => { enabled = value; listener({type:'settings-changed',encryptionEnabled:value},{id:'test'},() => {}); },deliver:message => new Promise(resolve => listener({type:'deliver',text:cipher,scope,...message},{id:'test'},resolve))};
 }
 test('replace native composer, safely render plaintext, deliver ciphertext and restore on navigation', async t => {
   const f = fixture(); t.after(() => f.dom.window.close()); await wait(250);

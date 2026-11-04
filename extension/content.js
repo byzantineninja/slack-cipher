@@ -17,6 +17,10 @@
   }
   function restoreComposers() {
     for (const {root,frame} of composers.values()) { root.classList.remove('slackenc-hidden'); frame.remove(); }
+    for (const root of document.querySelectorAll('[data-slackenc-composer]')) {
+      root.classList.remove('slackenc-hidden', 'slackenc-sending'); root.removeAttribute('data-slackenc-composer');
+    }
+    for (const frame of document.querySelectorAll('.slackenc-frame')) frame.remove();
     composers.clear();
   }
   function restoreMessages() {
@@ -39,6 +43,7 @@
       if (editor.textContent.trim()) {
         frame.title += '（原生草稿仍保留，請先處理草稿）';
       }
+      root.setAttribute('data-slackenc-composer', id);
       root.classList.add('slackenc-hidden'); root.after(frame);
       composers.set(id, {root,editor,frame,scope,busy:false});
     });
@@ -84,6 +89,12 @@
     }, true);
   }
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
+    if (sender.id !== chrome.runtime.id) return;
+    if (message.type === 'settings-changed') {
+      encryptionEnabled = message.encryptionEnabled !== false;
+      if (!encryptionEnabled) restoreComposers();
+      restoreMessages(); schedule(); respond({ok:true}); return;
+    }
     if (message.type !== 'deliver' || sender.id !== chrome.runtime.id) return;
     const item = composers.get(message.composer);
     async function deliver() {
@@ -120,7 +131,6 @@
     catch { /* Existing protected composers stay blocked if the worker is unavailable. */ }
   }
   new MutationObserver(schedule).observe(document.documentElement, {childList:true,subtree:true,characterData:true});
-  chrome.storage.onChanged.addListener((_, area) => { if (area === 'local') refresh(); });
   window.addEventListener('popstate', schedule);
   setInterval(schedule, 1000);
   schedule();
