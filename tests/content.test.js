@@ -7,7 +7,7 @@ const script = await readFile(new URL('../extension/content.js',import.meta.url)
 const scope = 'T123/C456';
 const cipher = `⚿:abcdefghijkl:${encodeCompact(Uint8Array.from({length:29},(_,i) => i === 0 ? 1 : 0))}`;
 const wait = ms => new Promise(resolve => setTimeout(resolve,ms));
-function fixture({draft = '', decryptError = false, noKey = false, workerDown = false} = {}) {
+function fixture({draft = '', decryptError = false, decryptScope = scope, noKey = false, workerDown = false} = {}) {
   const dom = new JSDOM(`<div data-qa="message-text">${cipher}</div><div class="p-message_input"><div class="ql-editor" contenteditable="true" role="textbox">${draft}</div><button data-qa="texty_send_button">Send</button></div>`, {url:'https://app.slack.com/client/T123/C456',runScripts:'outside-only',pretendToBeVisual:true});
   const {window:w} = dom;
   let listener, sent = [], sentTargets = [], decryptRequests = [], enabled = true, rejectNext = false, runtimeCalls = 0;
@@ -20,7 +20,7 @@ function fixture({draft = '', decryptError = false, noKey = false, workerDown = 
         if (workerDown) throw new Error('worker unavailable');
         return {ok:true,defaultKeyId:noKey ? '' : 'abcdefghijkl',overlayVisible:enabled};
       }
-      if (message.type === 'decrypt') { decryptRequests.push(message); return decryptError || message.scope !== scope ? {ok:false,error:'尚未設定金鑰或頻道不符'} : {ok:true,text:'<img src=x onerror=alert(1)>秘密'}; }
+      if (message.type === 'decrypt') { decryptRequests.push(message); return decryptError || message.scope !== decryptScope ? {ok:false,error:'尚未設定金鑰或頻道不符'} : {ok:true,text:'<img src=x onerror=alert(1)>秘密'}; }
     }}
   };
   w.document.execCommand = (command, _, text) => { assert.equal(command,'insertText'); const selected = w.getSelection().getRangeAt(0).commonAncestorContainer;
@@ -242,4 +242,140 @@ test('permalinks pasted in main message text do not redefine the main conversati
   link.textContent = 'reference'; node.before(link); await wait(220);
   assert.equal(frameParams(f.w.document.querySelector('iframe')).get('scope'),scope);
   assert.equal(frameParams(f.w.document.querySelector('iframe')).get('thread'),'');
+});
+
+function addConversation(f, {channel = 'D789', dialog = true} = {}) {
+  const pane = f.w.document.createElement('section'); pane.className = 'p-view_contents';
+  if (dialog) pane.setAttribute('role','dialog');
+  pane.innerHTML = `<div class="p-file_drag_drop__container"><div data-qa="message_container" data-msg-channel-id="${channel}"><a class="c-timestamp" href="https://example.slack.com/archives/${channel}/p1793771537474279">Timestamp</a><div data-qa="message-text">${cipher}</div></div><div data-qa="message_input_container"><div class="c-basic_container__body"><div class="ql-editor" contenteditable="true"></div><button data-qa="texty_send_button">Send</button></div></div></div>`;
+  f.w.document.body.append(pane);
+  return {pane,row:pane.querySelector('[data-qa="message_container"]'),root:pane.querySelector('.c-basic_container__body'),editor:pane.querySelector('.ql-editor')};
+}
+test('conversation pane on the activity route resolves a DM, decrypts and sends to its own input', async t => {
+  const f = fixture({decryptScope:'T123/D789'}); t.after(() => f.dom.window.close());
+  f.w.history.replaceState({},'', '/client/T123/activity-inbox');
+  const activity = f.w.document.createElement('div');
+  activity.innerHTML = `<div data-qa="message_container" data-msg-channel-id="C999"><div data-qa="message-text">${cipher}</div></div>`;
+  f.w.document.body.prepend(activity);
+  const conversation = addConversation(f); await wait(220);
+  const params = frameParams(conversation.pane.querySelector('iframe'));
+  assert.equal(params.get('scope'),'T123/D789'); assert.equal(params.get('thread'),'');
+  assert.equal(conversation.pane.querySelector('.slackenc-plaintext').textContent,'<img src=x onerror=alert(1)>秘密');
+  assert.equal(activity.querySelector('.slackenc-plaintext'),null);
+  assert.ok(!f.decryptRequests.some(message => message.scope === 'T123/C999'));
+  assert.equal((await f.deliver({composer:params.get('composer'),scope:'T123/D789'})).ok,true);
+  assert.deepEqual(f.sent,[cipher]); assert.equal(f.sentTargets[0],conversation.editor);
+  assert.equal(f.editor.textContent,'');
+});
+test('conversation pane keeps main, sidebar, nested conversation and thread scopes separate', async t => {
+  const f = fixture(); t.after(() => f.dom.window.close());
+  const sidebar = addConversation(f), nested = addConversation(f,{channel:'G789'});
+  sidebar.pane.append(nested.pane);
+  const thread = addThread(f);
+  const row = f.w.document.createElement('div'); row.setAttribute('data-qa','message_container'); row.setAttribute('data-msg-channel-id','C789');
+  thread.pane.querySelector('[data-qa="message-text"]').replaceWith(row);
+  row.innerHTML = `<div data-qa="message-text">${cipher}</div>`;
+  sidebar.pane.append(thread.pane); await wait(220);
+  const mainParams = frameParams(f.editor.closest('.p-message_input').nextElementSibling);
+  const sideParams = frameParams(sidebar.root.nextElementSibling);
+  const nestedParams = frameParams(nested.root.nextElementSibling);
+  const threadParams = frameParams(thread.root.nextElementSibling);
+  assert.equal(mainParams.get('scope'),scope);
+  assert.equal(sideParams.get('scope'),'T123/D789'); assert.equal(sideParams.get('thread'),'');
+  assert.equal(nestedParams.get('scope'),'T123/G789'); assert.equal(nestedParams.get('thread'),'');
+  assert.equal(threadParams.get('scope'),'T123/C789'); assert.equal(threadParams.get('thread'),'1793685658.887849');
+  assert.equal((await f.deliver({composer:mainParams.get('composer')})).ok,true);
+  assert.equal((await f.deliver({composer:sideParams.get('composer'),scope:'T123/D789'})).ok,true);
+  assert.deepEqual(f.sentTargets,[f.editor,sidebar.editor]);
+});
+test('conversation pane attribute-only switches reject stale delivery and discard old plaintext', async t => {
+  const f = fixture({decryptScope:'T123/D789'}); t.after(() => f.dom.window.close());
+  f.w.history.replaceState({},'', '/client/T123/activity-inbox');
+  const conversation = addConversation(f); await wait(350);
+  const oldFrame = conversation.root.nextElementSibling, oldParams = frameParams(oldFrame);
+  assert.equal(oldParams.get('scope'),'T123/D789');
+  assert.ok(conversation.pane.querySelector('.slackenc-plaintext'));
+  conversation.row.setAttribute('data-msg-channel-id','G789');
+  assert.equal((await f.deliver({composer:oldParams.get('composer'),scope:'T123/D789'})).ok,false);
+  assert.equal(f.sent.length,0);
+  await wait(220);
+  const nextParams = frameParams(conversation.root.nextElementSibling);
+  assert.equal(nextParams.get('scope'),'T123/G789');
+  assert.notEqual(nextParams.get('composer'),oldParams.get('composer')); assert.equal(oldFrame.isConnected,false);
+  assert.equal(conversation.pane.querySelector('.slackenc-plaintext'),null);
+  assert.equal(conversation.row.querySelector('[data-qa="message-text"]').classList.contains('slackenc-hidden'),false);
+  assert.ok(f.decryptRequests.some(message => message.scope === 'T123/G789'));
+  assert.equal(f.w.location.pathname,'/client/T123/activity-inbox');
+});
+test('conversation switch discards a pending decryption result from the previous conversation', async t => {
+  const f = fixture({decryptScope:'T123/D789'}); t.after(() => f.dom.window.close());
+  f.w.history.replaceState({},'', '/client/T123/activity-inbox');
+  const sendMessage = f.w.chrome.runtime.sendMessage;
+  let finishDecrypt;
+  f.w.chrome.runtime.sendMessage = message => message.type === 'decrypt' && message.scope === 'T123/D789'
+    ? new Promise(resolve => { finishDecrypt = resolve; }) : sendMessage(message);
+  const conversation = addConversation(f); await wait(220);
+  const oldView = conversation.pane.querySelector('.slackenc-plaintext');
+  assert.ok(oldView); assert.equal(typeof finishDecrypt,'function');
+  conversation.row.setAttribute('data-msg-channel-id','G789');
+  finishDecrypt({ok:true,text:'previous conversation secret'}); await wait(0);
+  assert.notEqual(oldView.textContent,'previous conversation secret');
+  await wait(220);
+  assert.equal(oldView.isConnected,false);
+  assert.equal(conversation.pane.textContent.includes('previous conversation secret'),false);
+});
+test('conversation switch after ciphertext insertion stops before clicking send and preserves the draft', async t => {
+  const f = fixture(); t.after(() => f.dom.window.close());
+  f.w.history.replaceState({},'', '/client/T123/activity-inbox');
+  const conversation = addConversation(f); await wait(220);
+  const params = frameParams(conversation.root.nextElementSibling);
+  const insert = f.w.document.execCommand;
+  f.w.document.execCommand = (...args) => {
+    const result = insert(...args); conversation.row.setAttribute('data-msg-channel-id','G789'); return result;
+  };
+  assert.equal((await f.deliver({composer:params.get('composer'),scope:'T123/D789'})).ok,false);
+  assert.equal(f.sent.length,0);
+  assert.equal(conversation.editor.textContent,cipher);
+  assert.equal(conversation.root.classList.contains('slackenc-sending'),false);
+});
+test('conversation pane with missing, invalid or conflicting IDs stays covered without using the main route', async t => {
+  for (const kind of ['missing','empty','invalid','conflicting','no messages']) {
+    const f = fixture(); t.after(() => f.dom.window.close());
+    const conversation = addConversation(f);
+    if (kind === 'missing') conversation.row.removeAttribute('data-msg-channel-id');
+    if (kind === 'empty') conversation.row.setAttribute('data-msg-channel-id','');
+    if (kind === 'invalid') conversation.row.setAttribute('data-msg-channel-id','not-a-conversation');
+    if (kind === 'conflicting') { const other = conversation.row.cloneNode(true); other.setAttribute('data-msg-channel-id','C999'); conversation.row.after(other); }
+    if (kind === 'no messages') conversation.row.remove();
+    await wait(220);
+    const params = frameParams(conversation.root.nextElementSibling);
+    assert.equal(params.get('scope'),'',kind);
+    assert.ok(conversation.root.classList.contains('slackenc-hidden'),kind);
+    assert.equal(conversation.pane.querySelector('.slackenc-plaintext'),null,kind);
+    assert.equal((await f.deliver({composer:params.get('composer'),scope:''})).ok,false,kind);
+    assert.equal(f.sent.length,0,kind);
+  }
+});
+test('conversation pane ignores other conversation links and attributes inside message text', async t => {
+  const f = fixture(); t.after(() => f.dom.window.close());
+  f.w.history.replaceState({},'', '/client/T123/activity-inbox');
+  const conversation = addConversation(f);
+  conversation.row.querySelector('[data-qa="message-text"]').innerHTML = '<a href="https://example.slack.com/archives/C999/p1793685658887849?thread_ts=1793685658.887849">reference</a><span data-msg-channel-id="C999">reference</span>';
+  await wait(220);
+  const params = frameParams(conversation.root.nextElementSibling);
+  assert.equal(params.get('scope'),'T123/D789'); assert.equal(params.get('thread'),'');
+});
+test('conversation pane resolves metadata that arrives after its input', async t => {
+  const f = fixture(); t.after(() => f.dom.window.close());
+  f.w.history.replaceState({},'', '/client/T123/activity-inbox');
+  const conversation = addConversation(f); conversation.row.removeAttribute('data-msg-channel-id'); await wait(350);
+  assert.equal(frameParams(conversation.root.nextElementSibling).get('scope'),'');
+  conversation.row.setAttribute('data-msg-channel-id','D789'); await wait(220);
+  assert.equal(frameParams(conversation.root.nextElementSibling).get('scope'),'T123/D789');
+});
+test('conversation pane on the full conversation route keeps URL fallback when no messages exist', async t => {
+  const f = fixture(); t.after(() => f.dom.window.close());
+  const conversation = addConversation(f,{dialog:false}); conversation.row.remove(); await wait(220);
+  const params = frameParams(conversation.root.nextElementSibling);
+  assert.equal(params.get('scope'),scope); assert.equal(params.get('thread'),'');
 });

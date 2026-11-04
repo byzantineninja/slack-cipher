@@ -2,6 +2,7 @@
   const EDITOR = '.ql-editor[contenteditable="true"]';
   const ROOT = '[data-qa="message_input_container"], .p-message_input';
   const THREAD = '.p-thread_view, .p-thread_flexpane, .p-threads_view__thread, [data-qa="thread_view"], [data-qa="thread_flexpane"]';
+  const CONVERSATION = '.p-view_contents';
   const MESSAGE = '[data-qa="message-text"], .c-message_kit__text';
   const SEND = '[data-qa="texty_send_button"]';
   const composers = new Map();
@@ -72,8 +73,24 @@
       return workspace() && targets.size === 1 ? [...targets.values()][0] : null;
     }
     if (node.matches(EDITOR) && !node.closest(ROOT)) return null;
+    pane = node.closest(CONVERSATION);
+    if (pane) {
+      const channels = new Set();
+      for (const message of pane.querySelectorAll('[data-qa="message_container"]')) {
+        // Keep nested conversations, threads and message text outside this pane's identity.
+        if (message.closest(CONVERSATION) !== pane || message.closest(THREAD) || message.closest(MESSAGE)) continue;
+        const channel = message.getAttribute('data-msg-channel-id');
+        if (!/^[CDG][A-Z0-9]+$/.test(channel || '')) return null;
+        channels.add(channel);
+      }
+      if (channels.size) {
+        return workspace() && channels.size === 1 ? {scope:`${workspace()}/${[...channels][0]}`,thread:'',pane} : null;
+      }
+      // An empty sidebar must not borrow the main route's conversation.
+      if (pane.matches('[role="dialog"]')) return null;
+    }
     const scope = currentScope();
-    return scope ? {scope,thread:'',pane:null} : null;
+    return scope ? {scope,thread:'',pane} : null;
   }
   function sameContext(item) {
     const next = context(item.editor);
@@ -182,7 +199,7 @@
     const item = composers.get(message.composer);
     async function deliver() {
       if (!runtimeAvailable()) throw new Error(reloadMessage);
-      if (!overlayVisible || !item || item.busy || item.scope !== message.scope || !sameContext(item) || !item.editor.isConnected) throw new Error('頻道或輸入框已變更，草稿已保留');
+      if (!overlayVisible || !item || !item.scope || item.busy || item.scope !== message.scope || !sameContext(item) || !item.editor.isConnected) throw new Error('頻道或輸入框已變更，草稿已保留');
       if (typeof message.encrypted !== 'boolean' || typeof message.text !== 'string' || !message.text.trim()) throw new Error('無效的訊息送出模式');
       if (message.encrypted && !/^(?:⚿:[A-Za-z0-9]{12}:[\u4e00-\u8dff]+[\u4e00-\u4e0d]|[\u3400-\u4dbf]{13}[\u4e00-\u8dff]+[\u3400-\u4dbf])$/.test(message.text)) throw new Error('拒絕傳送非密文');
       if (item.editor.textContent.trim()) throw new Error('Slack 原生輸入框有草稿或待確認密文。請暫時停用擴充套件並處理草稿後重試');
@@ -224,7 +241,7 @@
     chrome.runtime.onMessage.addListener(onMessage);
   } catch { invalidate(); return; }
   observer = new MutationObserver(schedule);
-  observer.observe(document.documentElement, {childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['href']});
+  observer.observe(document.documentElement, {childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['href','data-msg-channel-id']});
   window.addEventListener('popstate', schedule);
   pollTimer = setInterval(schedule, 1000);
   schedule();
