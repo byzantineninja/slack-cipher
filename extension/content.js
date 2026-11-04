@@ -44,10 +44,12 @@
   function context(node) {
     let pane = node.closest(THREAD);
     if (!pane) {
-      // Discover a thread pane by its permalink when Slack changes its classes.
+      // New threads may expose only the root timestamp link, without thread_ts.
+      // Require a composer in the pane so links inside message text cannot define it.
       for (let parent = node.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
-        if (parent.querySelectorAll(EDITOR).length > 1 || parent.querySelector(ROOT)) break;
-        if (parent.querySelector('a[href*="thread_ts="]')) { pane = parent; break; }
+        const editors = parent.querySelectorAll(EDITOR).length;
+        if (editors > 1 || parent.matches(ROOT) || parent.querySelector(ROOT)) break;
+        if (editors === 1 && parent.querySelector('a[href*="/archives/"][href*="/p"]')) { pane = parent; break; }
       }
     }
     if (pane) {

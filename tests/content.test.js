@@ -222,3 +222,24 @@ test('explicit plaintext delivery keeps the overlay visible and requires a valid
   assert.equal((await f.deliver({composer,encrypted:undefined,text:plain})).ok,false);
   assert.equal(f.sent.length,1);
 });
+
+test('fresh Slack sidebar threads resolve without a known wrapper or thread_ts parameter', async t => {
+  const f = fixture(); t.after(() => f.dom.window.close()); await wait(200);
+  const thread = addThread(f,{knownClass:false,rootOnly:true,channel:'D789'}); await wait(220);
+  const frame = thread.root.nextElementSibling, params = frameParams(frame);
+  assert.equal(params.get('scope'),'T123/D789');
+  assert.equal(params.get('thread'),'1793685658.887849');
+  assert.ok(f.decryptRequests.some(message => message.scope === 'T123/D789'));
+  assert.equal((await f.deliver({composer:params.get('composer'),scope:'T123/D789'})).ok,true);
+  assert.equal(f.sentTargets[0],thread.editor);
+  assert.equal(f.editor.textContent,'');
+});
+test('permalinks pasted in main message text do not redefine the main conversation', async t => {
+  const f = fixture(); t.after(() => f.dom.window.close()); await wait(200);
+  const node = f.w.document.querySelector('[data-qa="message-text"]');
+  const link = f.w.document.createElement('a');
+  link.href = 'https://example.slack.com/archives/C999/p1793685658887849?thread_ts=1793685658.887849';
+  link.textContent = 'reference'; node.before(link); await wait(220);
+  assert.equal(frameParams(f.w.document.querySelector('iframe')).get('scope'),scope);
+  assert.equal(frameParams(f.w.document.querySelector('iframe')).get('thread'),'');
+});
