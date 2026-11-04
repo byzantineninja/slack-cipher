@@ -18,7 +18,7 @@ async function refreshDrafts() {
   const entries = Object.entries(await chrome.storage.session.get(null)).filter(([key]) => key.startsWith('draft:'));
   document.querySelector('#drafts').replaceChildren(...entries.map(([,draft]) => {
     const section = document.createElement('section'), label = document.createElement('p'), text = document.createElement('textarea');
-    label.textContent = draft.scope; text.value = draft.text; text.readOnly = true; text.setAttribute('aria-label', `${draft.scope} 草稿`);
+    label.textContent = draft.scope + (draft.thread ? ` / 對話串 ${draft.thread}` : ''); text.value = draft.text; text.readOnly = true; text.setAttribute('aria-label', `${draft.scope} 草稿`);
     section.append(label,text); return section;
   }));
 }

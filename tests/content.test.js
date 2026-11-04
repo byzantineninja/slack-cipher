@@ -10,7 +10,7 @@ const wait = ms => new Promise(resolve => setTimeout(resolve,ms));
 function fixture({draft = '', decryptError = false, noKey = false, workerDown = false} = {}) {
   const dom = new JSDOM(`<div data-qa="message-text">${cipher}</div><div class="p-message_input"><div class="ql-editor" contenteditable="true" role="textbox">${draft}</div><button data-qa="texty_send_button">Send</button></div>`, {url:'https://app.slack.com/client/T123/C456',runScripts:'outside-only',pretendToBeVisual:true});
   const {window:w} = dom;
-  let listener, sent = [], enabled = true;
+  let listener, sent = [], sentTargets = [], decryptRequests = [], enabled = true;
   const editor = w.document.querySelector('.ql-editor');
   w.chrome = {
     runtime:{id:'test',getURL:path => `chrome-extension://test/${path}`, onMessage:{addListener:fn => {listener = fn;}},async sendMessage(message) {
@@ -18,13 +18,19 @@ function fixture({draft = '', decryptError = false, noKey = false, workerDown = 
         if (workerDown) throw new Error('worker unavailable');
         return {ok:true,defaultKeyId:noKey ? '' : 'abcdefghijkl',encryptionEnabled:enabled};
       }
-      if (message.type === 'decrypt') return decryptError || message.scope !== scope ? {ok:false,error:'尚未設定金鑰或頻道不符'} : {ok:true,text:'<img src=x onerror=alert(1)>秘密'};
+      if (message.type === 'decrypt') { decryptRequests.push(message); return decryptError || message.scope !== scope ? {ok:false,error:'尚未設定金鑰或頻道不符'} : {ok:true,text:'<img src=x onerror=alert(1)>秘密'}; }
     }}
   };
-  w.document.execCommand = (command, _, text) => { assert.equal(command,'insertText'); editor.textContent = text; return true; };
-  w.document.querySelector('button').addEventListener('click',() => { sent.push(editor.textContent); editor.textContent = ''; });
+  w.document.execCommand = (command, _, text) => { assert.equal(command,'insertText'); const selected = w.getSelection().getRangeAt(0).commonAncestorContainer;
+    const target = (selected.nodeType === 1 ? selected : selected.parentElement).closest('.ql-editor');
+    target.textContent = text; return true; };
+  w.document.addEventListener('click', event => {
+    if (!event.target.matches('[data-qa="texty_send_button"]')) return;
+    const target = event.target.parentElement.querySelector('.ql-editor');
+    sent.push(target.textContent); sentTargets.push(target); target.textContent = '';
+  });
   w.eval(script);
-  return {dom,w,editor,sent,setEnabled:async value => { enabled = value; listener({type:'settings-changed',encryptionEnabled:value},{id:'test'},() => {}); },deliver:message => new Promise(resolve => listener({type:'deliver',text:cipher,scope,...message},{id:'test'},resolve))};
+  return {dom,w,editor,sent,sentTargets,decryptRequests,setEnabled:async value => { enabled = value; listener({type:'settings-changed',encryptionEnabled:value},{id:'test'},() => {}); },deliver:message => new Promise(resolve => listener({type:'deliver',text:cipher,scope,...message},{id:'test'},resolve))};
 }
 test('replace native composer, safely render plaintext, deliver ciphertext and restore on navigation', async t => {
   const f = fixture(); t.after(() => f.dom.window.close()); await wait(250);
@@ -81,4 +87,79 @@ test('global switch restores native input, keeps decryption, and rejects stale d
   await f.setEnabled(true); await wait(200);
   assert.ok(f.w.document.querySelector('iframe'));
   assert.ok(f.editor.closest('.p-message_input').classList.contains('slackenc-hidden'));
+});
+
+function addThread(f, {channel = 'C789', thread = '1793685658.887849', knownClass = true, rootOnly = false} = {}) {
+  const pane = f.w.document.createElement('section');
+  if (knownClass) pane.className = 'p-thread_view';
+  const path = `/archives/${channel}/p${thread.replace('.', '')}`;
+  pane.innerHTML = `<a href="https://example.slack.com${path}${rootOnly ? '' : `?thread_ts=${thread}&cid=${channel}`}">Timestamp</a><div data-qa="message-text">${cipher}</div><div class="c-texty_input"><div class="ql-editor" contenteditable="true"></div><button data-qa="texty_send_button">Reply</button></div>`;
+  f.w.document.body.append(pane);
+  return {pane,root:pane.querySelector('.c-texty_input'),editor:pane.querySelector('.ql-editor'),link:pane.querySelector('a')};
+}
+function frameParams(frame) { return new URLSearchParams(new URL(frame.src).hash.slice(1)); }
+test('thread pane has its own composer and uses its channel rather than the main route', async t => {
+  const f = fixture(); t.after(() => f.dom.window.close()); await wait(200);
+  const thread = addThread(f); await wait(220);
+  const frames = [...f.w.document.querySelectorAll('iframe')]; assert.equal(frames.length,2);
+  const frame = frames.find(node => frameParams(node).get('thread'));
+  const params = frameParams(frame);
+  assert.equal(params.get('scope'),'T123/C789');
+  assert.equal(params.get('thread'),'1793685658.887849');
+  assert.match(frame.title,/對話串/);
+  assert.ok(thread.root.classList.contains('slackenc-hidden'));
+  assert.ok(f.decryptRequests.some(message => message.scope === 'T123/C789'));
+  const result = await f.deliver({composer:params.get('composer'),scope:'T123/C789'});
+  assert.equal(result.ok,true); assert.equal(f.sentTargets[0],thread.editor);
+  assert.equal(f.editor.textContent,'');
+  await f.setEnabled(false);
+  assert.equal(f.w.document.querySelector('iframe'),null);
+  assert.equal(thread.root.classList.contains('slackenc-hidden'),false);
+  assert.equal(f.editor.closest('.p-message_input').classList.contains('slackenc-hidden'),false);
+});
+test('switching a reused thread pane rejects the old composer before DOM observation runs', async t => {
+  const f = fixture(); t.after(() => f.dom.window.close()); await wait(200);
+  const thread = addThread(f); await wait(220);
+  const oldFrame = [...f.w.document.querySelectorAll('iframe')].find(node => frameParams(node).get('thread'));
+  const oldId = frameParams(oldFrame).get('composer');
+  thread.link.href = 'https://example.slack.com/archives/C789/p1793685659999999?thread_ts=1793685659.999999';
+  assert.equal((await f.deliver({composer:oldId,scope:'T123/C789'})).ok,false);
+  assert.equal(f.sent.length,0);
+  await wait(220);
+  const next = [...f.w.document.querySelectorAll('iframe')].find(node => frameParams(node).get('thread'));
+  assert.notEqual(frameParams(next).get('composer'),oldId);
+  assert.equal(frameParams(next).get('thread'),'1793685659.999999');
+  thread.pane.remove(); await wait(220);
+  assert.equal(f.w.document.querySelectorAll('iframe').length,1);
+});
+test('discover thread wrappers without main input classes and identify new threads by root permalink', async t => {
+  const f = fixture(); t.after(() => f.dom.window.close()); await wait(200);
+  const thread = addThread(f,{knownClass:false}); await wait(220);
+  assert.ok(thread.root.classList.contains('slackenc-hidden'));
+  thread.pane.remove();
+  const fresh = addThread(f,{rootOnly:true}); await wait(220);
+  const frame = [...f.w.document.querySelectorAll('iframe')].find(node => frameParams(node).get('thread'));
+  assert.equal(frameParams(frame).get('thread'),'1793685658.887849');
+  assert.ok(fresh.root.classList.contains('slackenc-hidden'));
+});
+test('unidentified thread stays covered and cannot send to the main channel', async t => {
+  const f = fixture(); t.after(() => f.dom.window.close()); await wait(200);
+  const thread = addThread(f); thread.link.remove(); await wait(220);
+  const frame = thread.root.nextElementSibling;
+  const id = frameParams(frame).get('composer');
+  assert.equal(frameParams(frame).get('scope'),'');
+  assert.equal((await f.deliver({composer:id})).ok,false);
+  await wait(220); assert.equal(thread.root.nextElementSibling,frame);
+  assert.equal(f.sent.length,0);
+});
+
+test('thread list routes resolve the conversation from the thread permalink', async t => {
+  const f = fixture(); t.after(() => f.dom.window.close()); await wait(200);
+  f.w.history.pushState({},'', '/client/T123/threads');
+  const thread = addThread(f,{channel:'D789'}); await wait(220);
+  const frame = [...f.w.document.querySelectorAll('iframe')].find(node => frameParams(node).get('thread'));
+  const params = frameParams(frame);
+  assert.equal(params.get('scope'),'T123/D789');
+  assert.equal((await f.deliver({composer:params.get('composer'),scope:'T123/D789'})).ok,true);
+  assert.equal(f.sentTargets[0],thread.editor);
 });

@@ -1,5 +1,6 @@
 const params = new URLSearchParams(location.hash.slice(1));
-const scope = params.get('scope'), composer = params.get('composer');
+const scope = params.get('scope'), composer = params.get('composer'), thread = params.get('thread') || '';
+if (thread) document.querySelector('strong').textContent = '🔒 加密回覆對話串';
 const form = document.querySelector('form'), text = document.querySelector('textarea');
 const status = document.querySelector('#status'), send = document.querySelector('#send');
 let busy = false;
@@ -7,7 +8,7 @@ let draftWrites = Promise.resolve();
 const draftKey = `draft:${composer}`;
 function saveDraft(value) {
   draftWrites = draftWrites.catch(() => {}).then(() => value ?
-    chrome.storage.session.set({[draftKey]:{scope,text:value,updated:Date.now()}}) :
+    chrome.storage.session.set({[draftKey]:{scope,thread,text:value,updated:Date.now()}}) :
     chrome.storage.session.remove(draftKey));
   return draftWrites;
 }
@@ -19,8 +20,8 @@ async function refresh() {
     const state = await chrome.runtime.sendMessage({type:'state'});
     if (!state.ok) throw new Error(state.error);
     const id = state.defaultKeyId;
-    document.querySelector('#key').textContent = state.encryptionEnabled === false ? '加密已關閉，請使用 Slack 原生輸入框' : id ? `Key: ${id}` : '尚未設定金鑰：請至擴充套件設定產生或匯入金鑰';
-    send.disabled = busy || !id || state.encryptionEnabled === false;
+    document.querySelector('#key').textContent = !scope ? '無法辨識此對話串，已阻止送出' : state.encryptionEnabled === false ? '加密已關閉，請使用 Slack 原生輸入框' : id ? `Key: ${id}` : '尚未設定金鑰：請至擴充套件設定產生或匯入金鑰';
+    send.disabled = busy || !scope || !id || state.encryptionEnabled === false;
   } catch { status.textContent = '擴充套件已失效，請重新整理 Slack'; send.disabled = true; }
 }
 form.addEventListener('submit', async event => {
