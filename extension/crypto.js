@@ -16,7 +16,7 @@ export function keyId(raw) {
   return id;
 }
 export function parseEnvelope(text) {
-  const match = /^⚿:([A-Za-z0-9]{12}):(~[\u4e00-\u8dff]+[0-9a-d])$/.exec(text.trim());
+  const match = /^⚿:([A-Za-z0-9]{12}):([\u4e00-\u8dff]+[\u4e00-\u4e0d])$/.exec(text.trim());
   if (!match || match[2].length > 60000) throw new Error('無效的密文格式');
   const bytes = decodeCompact(match[2]);
   if (bytes.length < 29 || bytes[0] !== 1) throw new Error('不支援的密文版本');

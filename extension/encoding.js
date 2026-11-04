@@ -3,7 +3,7 @@
 const OFFSET = 0x4e00;
 export function encodeCompact(bytes) {
   if (!bytes.length) throw new Error('空白編碼');
-  let buffer = 0, bits = 0, result = '~';
+  let buffer = 0, bits = 0, result = '';
   for (const byte of bytes) {
     buffer = (buffer << 8) | byte; bits += 8;
     while (bits >= 14) {
@@ -14,12 +14,12 @@ export function encodeCompact(bytes) {
   }
   const padding = bits ? 14 - bits : 0;
   if (bits) result += String.fromCharCode(OFFSET + (buffer << padding));
-  return result + padding.toString(16);
+  return result + String.fromCharCode(OFFSET + padding);
 }
 export function decodeCompact(value) {
-  const match = /^~([\u4e00-\u8dff]+)([0-9a-d])$/.exec(value);
+  const match = /^([\u4e00-\u8dff]+)([\u4e00-\u4e0d])$/.exec(value);
   if (!match) throw new Error('無效的精簡編碼');
-  const chars = match[1], padding = parseInt(match[2], 16);
+  const chars = match[1], padding = match[2].charCodeAt(0) - OFFSET;
   const length = (chars.length * 14 - padding) / 8;
   if (!Number.isInteger(length) || length <= 0 || (chars.charCodeAt(chars.length - 1) - OFFSET) % (2 ** padding)) throw new Error('無效的編碼補位');
   const bytes = new Uint8Array(length);

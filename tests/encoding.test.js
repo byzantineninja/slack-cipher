@@ -13,14 +13,14 @@ test('compact encoding round trips every padding alignment and byte value', () =
   }
 });
 test('reject malformed compact encodings and nonzero padding', () => {
-  for (const text of ['~','~hello0','~一f','~一0','~丁6','~一6extra']) assert.throws(() => decodeCompact(text));
+  for (const text of ['','一','hello0','一一','丁丆','一丏','一丆extra']) assert.throws(() => decodeCompact(text));
 });
 test('compact ciphertext uses only the Unicode prefix and round trips correctly', async () => {
   const key = toHex(crypto.getRandomValues(new Uint8Array(32))), id = keyId(key);
   const plain = '測試訊息'.repeat(100), scope = 'T123/C456';
   const compact = await encrypt(plain,id,key,scope);
-  assert.ok(compact.startsWith(`⚿:${id}:`));
+  assert.match(compact,new RegExp(`^⚿:${id}:[\\u4e00-\\u8dff]+[\\u4e00-\\u4e0d]$`));
   assert.equal(await decrypt(compact,key,scope),plain);
   const length = parseEnvelope(compact).bytes.length;
-  assert.equal(compact.split(':')[2].length,Math.ceil(length * 8 / 14) + 2);
+  assert.equal(compact.split(':')[2].length,Math.ceil(length * 8 / 14) + 1);
 });

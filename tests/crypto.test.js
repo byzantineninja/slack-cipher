@@ -25,7 +25,7 @@ test('reject wrong key, wrong channel, altered ciphertext and altered key ID', a
   await assert.rejects(decrypt(text.replace(id,keyId(raw())),key,scope));
 });
 test('reject invalid envelopes, keys, blank or oversized messages', async () => {
-  for (const text of ['hello','⚿:short:~一6','⚿:abcdefghijkl:!!!!','⚿:abcdefghijkl:~一6']) assert.throws(() => parseEnvelope(text));
+  for (const text of ['hello','⚿:short:一丆','⚿:abcdefghijkl:!!!!','⚿:abcdefghijkl:一丆']) assert.throws(() => parseEnvelope(text));
   const key = raw(), id = keyId(key);
   await assert.rejects(encrypt(' ',id,key,'T1/C1'));
   await assert.rejects(encrypt('x'.repeat(20001),id,key,'T1/C1'));
